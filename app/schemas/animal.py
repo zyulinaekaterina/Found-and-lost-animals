@@ -14,6 +14,7 @@ class AnimalBase(BaseModel):
     size: str  # 'small', 'medium', 'large'
     location: str
     description: Optional[str] = None
+    image_url: Optional[str] = None
     contact_name: str
     contact_phone: Optional[str] = None
     contact_email: EmailStr
@@ -24,10 +25,25 @@ class AnimalCreate(AnimalBase):
     pass
 
 
+# Для обновления животного (все поля опциональны)
+class AnimalUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    status: Optional[str] = None
+    breed: Optional[str] = None
+    color: Optional[str] = None
+    size: Optional[str] = None
+    location: Optional[str] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_email: Optional[EmailStr] = None
+
+
 # Для ответа API (включает ID и даты)
 class AnimalResponse(AnimalBase):
     id: int
-    image_url: Optional[str] = None
     date_reported: datetime
     created_at: datetime
     updated_at: datetime
@@ -50,3 +66,6 @@ class AnimalListResponse(BaseModel):
     total: int
     page: int
     size: int
+
+    class Config:
+        from_attributes = True

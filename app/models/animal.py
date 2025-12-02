@@ -1,8 +1,7 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, JSON
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
 from datetime import datetime
-
-Base = declarative_base()
+from sqlalchemy.orm import relationship
+from app.core.database import Base
 
 
 class Animal(Base):
@@ -20,14 +19,20 @@ class Animal(Base):
     description = Column(Text, nullable=True)
     image_url = Column(String(500), nullable=True)
 
-    # ML поля (будем добавлять позже)
-    embedding = Column(JSON, nullable=True)  # Вектор признаков
-    embedding_model = Column(String(50), nullable=True)  # Версия ML модели
+    # ML поля - ПОКА ОСТАВЛЯЕМ КАК ЕСТЬ
+    # Позже заменим на Vector когда будем добавлять ML
+    embedding = Column(Text, nullable=True)  # Временно как Text
+    embedding_model = Column(String(50), nullable=True)
 
     # Контактная информация
     contact_name = Column(String(100), nullable=False)
     contact_phone = Column(String(20), nullable=True)
     contact_email = Column(String(100), nullable=False)
+
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+
+    owner = relationship("User", back_populates="animals_created")
 
     # Метаданные
     created_at = Column(DateTime, default=datetime.utcnow)

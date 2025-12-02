@@ -1,23 +1,45 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import animals
+from app.core.database import create_tables
+from app.core.config import settings
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+#  Импортируем роуты авторизации
+from app.routes import animals, auth
+
+# Создаем таблицы (включая users!)
+create_tables()
 
 app = FastAPI(
-    title="Animal Finder API",
-    description="API для поиска потерянных и найденных животных с ML-поиском",
-    version="1.0.0"
+    title=settings.PROJECT_NAME,
+    description="API для поиска потерянных и найденных животных с авторизацией",
+    version=settings.VERSION,
+    # Добавляем контакты для документации
+    contact={
+        "name": "Animal Finder Team",
+        "email": "support@animalfinder.com",
+    },
 )
 
-# Настройка CORS для фронтенда
+#  Улучшаем CORS настройки
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:3000",  # React dev server
+        "http://localhost:5173",  # Vite dev server
+        "http://127.0.0.1:3000",  # Альтернальный адрес
+        "http://127.0.0.1:5173",  # Альтернальный адрес
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # GET, POST, PUT, DELETE, etc.
+    allow_headers=["*"],  # Authorization, Content-Type, etc.
 )
 
-# Подключаем роуты
+# ПОДКЛЮЧАЕМ РОУТЫ АВТОРИЗАЦИИ
+app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
+
+# Существующие роуты животных
 app.include_router(animals.router, prefix="/api/animals", tags=["animals"])
 
 @app.get("/")
@@ -26,8 +48,20 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "animal-finder-api"}
+    return {
+        "status": "healthy",
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION
+    }
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# Добавляем эндпоинт для проверки конфигурации (для отладки)
+@app.get("/config-check")
+async def config_check():
+    """Проверка конфигурации (только для разработки)"""
+    return {
+        "project_name": settings.PROJECT_NAME,
+        "jwt_algorithm": settings.ALGORITHM,
+        "access_token_expire_minutes": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        "refresh_token_expire_days": settings.REFRESH_TOKEN_EXPIRE_DAYS,
+        "secret_key_set": bool(settings.SECRET_KEY and settings.SECRET_KEY != "fallback-secret-key-for-dev")
+    }
