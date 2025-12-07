@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Bool
 from datetime import datetime
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from pgvector.sqlalchemy import Vector
 
 
 class Animal(Base):
@@ -19,10 +20,8 @@ class Animal(Base):
     description = Column(Text, nullable=True)
     image_url = Column(String(500), nullable=True)
 
-    # ML поля - ПОКА ОСТАВЛЯЕМ КАК ЕСТЬ
-    # Позже заменим на Vector когда будем добавлять ML
-    embedding = Column(Text, nullable=True)  # Временно как Text
-    embedding_model = Column(String(50), nullable=True)
+    # ML поле
+    embedding = Column(Vector(768), nullable=True)
 
     # Контактная информация
     contact_name = Column(String(100), nullable=False)

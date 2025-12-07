@@ -27,9 +27,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # React dev server
-        "http://localhost:5173",  # Vite dev server
-        "http://127.0.0.1:3000",  # Альтернальный адрес
-        "http://127.0.0.1:5173",  # Альтернальный адрес
+        # "http://localhost:5173",  # Vite dev server
+        # "http://127.0.0.1:3000",  # Альтернальный адрес
+        # "http://127.0.0.1:5173",  # Альтернальный адрес
     ],
     allow_credentials=True,
     allow_methods=["*"],  # GET, POST, PUT, DELETE, etc.

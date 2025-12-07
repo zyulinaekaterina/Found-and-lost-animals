@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
+from pydantic.networks import EmailStr
 from datetime import datetime
 from typing import Optional, List
 
@@ -14,7 +15,6 @@ class AnimalBase(BaseModel):
     size: str  # 'small', 'medium', 'large'
     location: str
     description: Optional[str] = None
-    image_url: Optional[str] = None
     contact_name: str
     contact_phone: Optional[str] = None
     contact_email: EmailStr
@@ -47,7 +47,7 @@ class AnimalResponse(AnimalBase):
     date_reported: datetime
     created_at: datetime
     updated_at: datetime
-
+    embedding: Optional[list[float]] = None
     class Config:
         from_attributes = True  # Для совместимости с SQLAlchemy
 
