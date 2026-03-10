@@ -1,334 +1,630 @@
+import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
+import axios from 'axios';
+
+// Добавляем токен ко всем запросам
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Типы данных, возвращаемые с бэкенда
+interface Animal {
+    id: number;
+    name: string;
+    type: 'dog' | 'cat' | 'other';
+    status: 'lost' | 'found';
+    color: string;
+    size: 'small' | 'medium' | 'large';
+    breed?: string;
+    location: string;
+    description: string;
+    created_at: string;
+    contact_name: string;
+    contact_phone: string;
+    contact_email: string;
+    image_url: string;
+    owner_id: number; // Для проверки владельца
+    // Эти поля могут быть в ответе, но не обязательны
+    is_active?: boolean;
+    updated_at?: string;
+    embedding?: number[];
+}
 
 interface User {
   id: number;
   name: string;
   email: string;
+  is_superuser?: boolean; // Добавляем поле для суперпользователя
 }
 
 interface AnimalInfoPageProps {
   onNavigate: (page: string) => void;
   user: User;
+  animalId: string;
 }
 
-export function AnimalInfoPage({ onNavigate, user }: AnimalInfoPageProps) {
-  // Демонстрационные данные
-  const animalData = {
-    id: "pet-001",
-    name: "Макс",
-    type: "собака",
-    breed: "Золотистый ретривер",
-    color: "Рыжий",
-    size: "Крупный",
-    status: "lost",
-    location: "Центральный парк, Москва",
-    dateReported: "15 января 2025",
-    lastSeen: "15 января 2025 в 15:00",
-    description: "Макс - дружелюбный и энергичный золотистый ретривер, который любит играть в мяч. Когда пропал, на нем был красный ошейник с биркой. Он очень общительный с другими собаками и людьми. Макс откликается на свое имя и знает основные команды, такие как 'сидеть' и 'стоять'. У него есть небольшой шрам на левом ухе с детства.",
-    imageUrl: "https://images.unsplash.com/photo-1754499265662-a1b9367c95f9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjdXRlJTIwZ29sZGVuJTIwcmV0cmlldmVyJTIwZG9nfGVufDF8fHx8MTc1ODE4MTc2OHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-    contact: {
-      name: "Сара Иванова",
-      phone: "+7 (999) 666 66 66",
-      email: "sara.ivanova@email.com"
-    },
-    characteristics: [
-      "Дружелюбен с детьми",
-      "Ладит с другими собаками",
-      "Откликается на имя",
-      "Знает основные команды",
-      "Есть микрочип"
-    ],
-    reward: "50000 руб"
+// Вспомогательная функция для форматирования даты
+const formatDate = (dateString: string) => {
+    try {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+        return dateString;
+    }
+};
+
+export function AnimalInfoPage({ onNavigate, user, animalId }: AnimalInfoPageProps) {
+  const [animalData, setAnimalData] = useState<Animal | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Состояние для формы редактирования
+  const [editForm, setEditForm] = useState<Partial<Animal>>({});
+  const [isEditMode, setIsEditMode] = useState(false);
+
+  // Загрузка данных о животном
+  useEffect(() => {
+    const fetchAnimal = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await axios.get(`/api/animals/${animalId}`);
+        console.log('Ответ от /api/animals/${animalId}:', response.data);
+        
+        // Проверяем, есть ли owner_id в ответе
+        if (!response.data.owner_id) {
+          console.warn('⚠️ ВНИМАНИЕ: Поле owner_id отсутствует в ответе бэкенда!');
+          console.warn('Полный ответ:', response.data);
+        }
+        
+        setAnimalData(response.data);
+        // Инициализируем форму редактирования
+        setEditForm({
+          name: response.data.name,
+          type: response.data.type,
+          status: response.data.status,
+          color: response.data.color,
+          size: response.data.size,
+          breed: response.data.breed,
+          location: response.data.location,
+          description: response.data.description,
+          contact_name: response.data.contact_name,
+          contact_phone: response.data.contact_phone,
+          contact_email: response.data.contact_email,
+        });
+      } catch (err: any) {
+        console.error('Error fetching animal details:', err);
+        const errorMessage = err.response?.data?.detail || err.message || 'Не удалось загрузить информацию о животном.';
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAnimal();
+  }, [animalId]);
+
+  // Функция для обновления животного
+  const handleUpdateAnimal = async () => {
+    if (!animalData || editing) return;
+    
+    // Проверяем, есть ли изменения
+    const hasChanges = Object.keys(editForm).some(key => {
+      return editForm[key as keyof Animal] !== animalData[key as keyof Animal];
+    });
+    
+    if (!hasChanges) {
+      alert('Нет изменений для сохранения');
+      setIsEditMode(false);
+      return;
+    }
+    
+    setEditing(true);
+    try {
+      // Отправляем PUT запрос на бэкенд
+      const response = await axios.put(`/api/animals/${animalId}`, editForm);
+      
+      // Обновляем данные на странице
+      setAnimalData(response.data);
+      
+      // Выходим из режима редактирования
+      setIsEditMode(false);
+      
+      // Показываем сообщение об успехе
+      alert('Объявление успешно обновлено!');
+      
+      // Обновляем форму новыми данными
+      setEditForm({
+        name: response.data.name,
+        type: response.data.type,
+        status: response.data.status,
+        color: response.data.color,
+        size: response.data.size,
+        breed: response.data.breed,
+        location: response.data.location,
+        description: response.data.description,
+        contact_name: response.data.contact_name,
+        contact_phone: response.data.contact_phone,
+        contact_email: response.data.contact_email,
+      });
+    } catch (err: any) {
+      console.error('Error updating animal:', err);
+      
+      let errorMessage = 'Не удалось обновить объявление';
+      
+      if (err.response?.status === 403) {
+        errorMessage = 'У вас нет прав для редактирования этого объявления';
+      } else if (err.response?.status === 404) {
+        errorMessage = 'Объявление не найдено';
+      } else if (err.response?.data?.detail) {
+        errorMessage = err.response.data.detail;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      alert(`Ошибка: ${errorMessage}`);
+    } finally {
+      setEditing(false);
+    }
   };
 
-  const handleContact = () => {
-    // В реальном приложении это откроет форму контакта или прямые сообщения
-    alert(`Связаться с ${animalData.contact.name} по телефону ${animalData.contact.phone}`);
+  // Функция для "мягкого" удаления карточки животного
+  const handleDeleteAnimal = async () => {
+    if (!animalData || deleting) return;
+    
+    // Запрос подтверждения у пользователя
+    if (!window.confirm('Вы уверены, что хотите удалить это объявление? Это действие нельзя будет отменить.')) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      // Отправляем DELETE запрос на бэкенд
+      await axios.delete(`/api/animals/${animalId}`);
+      
+      // Показываем сообщение об успехе
+      alert('Объявление успешно удалено!');
+      
+      // Перенаправляем пользователя на главную страницу
+      onNavigate('home');
+    } catch (err: any) {
+      console.error('Error deleting animal:', err);
+      
+      let errorMessage = 'Не удалось удалить объявление';
+      
+      if (err.response?.status === 403) {
+        errorMessage = 'У вас нет прав для удаления этого объявления';
+      } else if (err.response?.status === 404) {
+        errorMessage = 'Объявление не найдено';
+      } else if (err.response?.data?.detail) {
+        errorMessage = err.response.data.detail;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      alert(`Ошибка: ${errorMessage}`);
+    } finally {
+      setDeleting(false);
+    }
   };
 
-  const handleShare = () => {
-    // В реальном приложении это поделится ссылкой на объявление
-    navigator.clipboard.writeText(window.location.href);
-    alert('Ссылка на объявление скопирована в буфер обмена!');
+  // Обработчик изменения полей формы
+  const handleInputChange = (field: keyof Animal, value: string) => {
+    setEditForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
+
+  // Если животное уже удалено, но страница все еще открыта
+  if (animalData && animalData.is_active === false) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+        <div className="max-w-4xl mx-auto text-center py-20">
+          <h1 className="text-2xl font-bold mb-4">Объявление удалено</h1>
+          <p className="mb-6 text-muted-foreground">Это объявление было удалено владельцем.</p>
+          <Button onClick={() => onNavigate('home')}>
+            Вернуться на главную
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-4xl mx-auto text-center py-20">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+          <p>Загрузка информации...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !animalData) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-4xl mx-auto text-center py-20">
+          <h1 className="text-xl font-bold text-red-600 mb-4">{error || "Животное не найдено."}</h1>
+          <Button onClick={() => onNavigate('home')}>
+            Вернуться на главную
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  
+  const statusBadge = animalData.status === 'lost' 
+    ? { variant: 'destructive', text: 'Потерян' } 
+    : { variant: 'default', text: 'Найден' };
+  
+  // Проверяем права пользователя
+  const isOwner = animalData.owner_id === user.id;
+  const isSuperuser = user.is_superuser === true;
+  
+  // Может ли пользователь редактировать/удалять?
+  const canModify = isOwner || isSuperuser;
+  
+  const imageUrl = `/api/animals/image/${animalData.id}`;
 
   return (
-    <div className="min-h-screen bg-secondary/10">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Back Button */}
-        <Button 
-          variant="ghost" 
-          className="mb-6"
-          onClick={() => onNavigate('search')}
-        >
-          ← Назад к поиску
-        </Button>
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <Button variant="outline" onClick={() => onNavigate('home')}>
+            <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6"/>
+            </svg>
+            Назад к списку
+          </Button>
+          
+          {/* Кнопки действий - показываем если есть права */}
+          {canModify && (
+            <div className="flex gap-2">
+              {isEditMode ? (
+                <>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      setIsEditMode(false);
+                      // Восстанавливаем оригинальные данные
+                      setEditForm({
+                        name: animalData.name,
+                        type: animalData.type,
+                        status: animalData.status,
+                        color: animalData.color,
+                        size: animalData.size,
+                        breed: animalData.breed,
+                        location: animalData.location,
+                        description: animalData.description,
+                        contact_name: animalData.contact_name,
+                        contact_phone: animalData.contact_phone,
+                        contact_email: animalData.contact_email,
+                      });
+                    }}
+                    disabled={editing}
+                  >
+                    Отмена
+                  </Button>
+                  <Button 
+                    onClick={handleUpdateAnimal}
+                    disabled={editing}
+                  >
+                    {editing ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                        </svg>
+                        Сохранение...
+                      </>
+                    ) : 'Сохранить изменения'}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setIsEditMode(true)}
+                  >
+                    <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                    Редактировать
+                  </Button>
+                  <Button 
+                    variant="destructive" 
+                    onClick={handleDeleteAnimal}
+                    disabled={deleting}
+                  >
+                    {deleting ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                        </svg>
+                        Удаление...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 6h18"/>
+                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                          <line x1="10" y1="11" x2="10" y2="17"/>
+                          <line x1="14" y1="11" x2="14" y2="17"/>
+                        </svg>
+                        Удалить
+                      </>
+                    )}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Main Content */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Header Card */}
-            <Card>
-              <CardContent className="p-0">
-                <div className="relative">
-                  <ImageWithFallback
-                    src={animalData.imageUrl}
-                    alt={`${animalData.status === 'lost' ? 'Потерянный' : 'Найденный'} ${animalData.type} по кличке ${animalData.name}`}
-                    className="w-full h-96 object-cover rounded-t-lg"
-                  />
-                  <div className="absolute top-4 left-4 flex gap-2">
-                    <Badge 
-                      variant={animalData.status === 'lost' ? 'destructive' : 'default'}
-                      className="text-sm"
-                    >
-                      {animalData.status === 'lost' ? 'ПОТЕРЯН' : 'НАЙДЕН'}
-                    </Badge>
-                    <Badge variant="secondary" className="text-sm">
-                      {animalData.type.charAt(0).toUpperCase() + animalData.type.slice(1)}
-                    </Badge>
-                  </div>
-                  {animalData.reward && (
-                    <div className="absolute top-4 right-4">
-                      <Badge variant="default" className="bg-green-600 text-sm">
-                        Вознаграждение: {animalData.reward}
-                      </Badge>
-                    </div>
-                  )}
-                </div>
-                
-                <div className="p-6">
-                  <div className="flex items-start justify-between mb-4">
+          {/* Main Content (Image and Details) */}
+          <div className="lg:col-span-2 space-y-8">
+            <Card className="overflow-hidden">
+              <div className="relative">
+                <ImageWithFallback
+                  src={imageUrl}
+                  alt={`Фото ${animalData.name}`}
+                  className="w-full h-96 object-cover"
+                />
+                <Badge variant={statusBadge.variant} className="absolute top-4 left-4 text-lg p-2">
+                  {statusBadge.text}
+                </Badge>
+                {/* Бейдж для суперпользователя (опционально) */}
+                {isSuperuser && !isOwner && (
+                  <Badge variant="secondary" className="absolute top-4 right-4 text-lg p-2">
+                    👑 Админ
+                  </Badge>
+                )}
+              </div>
+
+              <CardContent className="p-6">
+                {isEditMode ? (
+                  // Форма редактирования
+                  <div className="space-y-4">
                     <div>
-                      <h1 className="text-3xl mb-2">{animalData.name}</h1>
-                      <p className="text-lg text-muted-foreground">
-                        {animalData.breed} • {animalData.color} • {animalData.size}
-                      </p>
+                      <label className="block text-sm font-medium mb-1">Имя животного *</label>
+                      <input
+                        type="text"
+                        value={editForm.name || ''}
+                        onChange={(e) => handleInputChange('name', e.target.value)}
+                        className="w-full p-2 border rounded"
+                        required
+                      />
                     </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={handleShare}>
-                        <svg className="h-4 w-4 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                          <polyline points="16,6 12,2 8,6"/>
-                          <line x1="12" x2="12" y1="2" y2="15"/>
-                        </svg>
-                        Поделиться
-                      </Button>
-                      <Button variant="outline" size="sm">
-                        <svg className="h-4 w-4 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-                        </svg>
-                        Сохранить
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid md:grid-cols-2 gap-4 mb-6">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                        <circle cx="12" cy="10" r="3"/>
-                      </svg>
-                      <span>{animalData.location}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M8 2v4"/>
-                        <path d="M16 2v4"/>
-                        <rect width="18" height="18" x="3" y="4" rx="2"/>
-                        <path d="M3 10h18"/>
-                      </svg>
-                      <span>Сообщено: {animalData.dateReported}</span>
-                    </div>
-                  </div>
-
-                  {animalData.status === 'lost' && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                      <div className="flex items-center gap-2 text-red-800 mb-2">
-                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10"/>
-                          <line x1="12" x2="12" y1="8" y2="12"/>
-                          <line x1="12" x2="12.01" y1="16" y2="16"/>
-                        </svg>
-                        <span className="font-medium">Последний раз видели</span>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Тип *</label>
+                        <select
+                          value={editForm.type || ''}
+                          onChange={(e) => handleInputChange('type', e.target.value as Animal['type'])}
+                          className="w-full p-2 border rounded"
+                          required
+                        >
+                          <option value="">Выберите тип</option>
+                          <option value="dog">Собака</option>
+                          <option value="cat">Кошка</option>
+                          <option value="other">Другое</option>
+                        </select>
                       </div>
-                      <p className="text-red-700">{animalData.lastSeen}</p>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Статус *</label>
+                        <select
+                          value={editForm.status || ''}
+                          onChange={(e) => handleInputChange('status', e.target.value as Animal['status'])}
+                          className="w-full p-2 border rounded"
+                          required
+                        >
+                          <option value="">Выберите статус</option>
+                          <option value="lost">Потерян</option>
+                          <option value="found">Найден</option>
+                        </select>
+                      </div>
                     </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Цвет *</label>
+                        <input
+                          type="text"
+                          value={editForm.color || ''}
+                          onChange={(e) => handleInputChange('color', e.target.value)}
+                          className="w-full p-2 border rounded"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Размер *</label>
+                        <select
+                          value={editForm.size || ''}
+                          onChange={(e) => handleInputChange('size', e.target.value as Animal['size'])}
+                          className="w-full p-2 border rounded"
+                          required
+                        >
+                          <option value="">Выберите размер</option>
+                          <option value="small">Маленький</option>
+                          <option value="medium">Средний</option>
+                          <option value="large">Крупный</option>
+                        </select>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Порода</label>
+                      <input
+                        type="text"
+                        value={editForm.breed || ''}
+                        onChange={(e) => handleInputChange('breed', e.target.value)}
+                        className="w-full p-2 border rounded"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Местоположение *</label>
+                      <input
+                        type="text"
+                        value={editForm.location || ''}
+                        onChange={(e) => handleInputChange('location', e.target.value)}
+                        className="w-full p-2 border rounded"
+                        required
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Описание</label>
+                      <textarea
+                        value={editForm.description || ''}
+                        onChange={(e) => handleInputChange('description', e.target.value)}
+                        className="w-full p-2 border rounded h-32"
+                        rows={4}
+                      />
+                    </div>
+                    
+                    <Separator className="my-4" />
+                    
+                    <h3 className="text-lg font-semibold mb-3">Контактная информация</h3>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Контактное лицо *</label>
+                        <input
+                          type="text"
+                          value={editForm.contact_name || ''}
+                          onChange={(e) => handleInputChange('contact_name', e.target.value)}
+                          className="w-full p-2 border rounded"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Телефон</label>
+                        <input
+                          type="tel"
+                          value={editForm.contact_phone || ''}
+                          onChange={(e) => handleInputChange('contact_phone', e.target.value)}
+                          className="w-full p-2 border rounded"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Email *</label>
+                      <input
+                        type="email"
+                        value={editForm.contact_email || ''}
+                        onChange={(e) => handleInputChange('contact_email', e.target.value)}
+                        className="w-full p-2 border rounded"
+                        required
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  // Режим просмотра
+                  <>
+                    <h1 className="text-3xl font-bold mb-4">
+                        {animalData.name || 'Неизвестно'} ({animalData.type})
+                    </h1>
 
-            {/* Description */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="4" r="2"/>
-                    <circle cx="18" cy="8" r="2"/>
-                    <circle cx="13" cy="19" r="2"/>
-                    <circle cx="6" cy="19" r="2"/>
-                    <circle cx="20" cy="16" r="2"/>
-                    <path d="m9 10 3 3 3-3"/>
-                  </svg>
-                  Описание
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-foreground leading-relaxed">
-                  {animalData.description}
-                </p>
-              </CardContent>
-            </Card>
+                    <div className="grid grid-cols-2 gap-y-3 mb-6 text-sm">
+                      <div className="font-medium">Порода:</div> <div>{animalData.breed || 'Не указана'}</div>
+                      <div className="font-medium">Цвет:</div> <div>{animalData.color}</div>
+                      <div className="font-medium">Размер:</div> <div>{animalData.size}</div>
+                      <div className="font-medium">Последнее место:</div> <div>{animalData.location}</div>
+                      <div className="font-medium">Дата сообщения:</div> <div>{formatDate(animalData.created_at)}</div>
+                      {animalData.updated_at && animalData.updated_at !== animalData.created_at && (
+                        <>
+                          <div className="font-medium">Обновлено:</div> <div>{formatDate(animalData.updated_at)}</div>
+                        </>
+                      )}
+                    </div>
 
-            {/* Characteristics */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Характеристики</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-2">
-                  {animalData.characteristics.map((characteristic, index) => (
-                    <Badge key={index} variant="secondary">
-                      {characteristic}
-                    </Badge>
-                  ))}
-                </div>
+                    <Separator className="my-4" />
+
+                    <h2 className="text-xl font-semibold mb-3">Подробности и описание</h2>
+                    <p className="text-gray-700 whitespace-pre-wrap">
+                      {animalData.description || 'Описание не предоставлено.'}
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Contact Information */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                    <circle cx="12" cy="7" r="4"/>
-                  </svg>
-                  Контактная информация
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <p className="font-medium mb-2">{animalData.contact.name}</p>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-                      </svg>
-                      <span>{animalData.contact.phone}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect width="20" height="16" x="2" y="4" rx="2"/>
-                        <path d="m22 7-10 5L2 7"/>
-                      </svg>
-                      <span>{animalData.contact.email}</span>
-                    </div>
+          {/* Sidebar (Contact Info) */}
+          <div className="lg:col-span-1 space-y-8">
+            {!isEditMode && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Контактная информация</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1">
+                    <p className="font-medium">{animalData.contact_name}</p>
+                    <p className="text-sm text-muted-foreground">{animalData.contact_email}</p>
+                    {animalData.contact_phone && (
+                      <p className="text-sm text-muted-foreground">{animalData.contact_phone}</p>
+                    )}
                   </div>
-                </div>
-                
-                <Separator />
-                
-                <Button className="w-full" onClick={handleContact}>
-                  <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-                  </svg>
-                  Связаться с владельцем
-                </Button>
-                
-                <Button variant="outline" className="w-full">
-                  <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect width="20" height="16" x="2" y="4" rx="2"/>
-                    <path d="m22 7-10 5L2 7"/>
-                  </svg>
-                  Отправить сообщение
-                </Button>
-              </CardContent>
-            </Card>
+                  
+                  <Button className="w-full">
+                    Связаться с владельцем
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
 
-            {/* Tips */}
+            {/* Секция статистики */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="12" x2="12" y1="8" y2="12"/>
-                    <line x1="12" x2="12.01" y1="16" y2="16"/>
-                  </svg>
-                  Советы по безопасности
-                </CardTitle>
+                <CardTitle>Статистика объявления</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="space-y-2">
-                  <p>• Встречайтесь в общественном, безопасном месте</p>
-                  <p>• Приводите с собой друга на встречу</p>
-                  <p>• Тщательно проверьте личность питомца</p>
-                  <p>• Попросите документы подтверждающие владение</p>
-                  <p>• Доверяйте своей интуиции</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Recent Activity */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12,6 12,12 16,14"/>
-                  </svg>
-                  Последние активности
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="border-l-2 border-primary/20 pl-4 space-y-2">
+              <CardContent>
+                <div className="space-y-3">
                   <div>
-                    <p className="font-medium">Объявление размещено</p>
-                    <p className="text-muted-foreground">{animalData.dateReported}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium">Поделились 15 раз</p>
-                    <p className="text-muted-foreground">Помогаем распространить информацию</p>
+                    <p className="font-medium">120 просмотров</p>
+                    <p className="text-sm text-muted-foreground">Помогаем распространить информацию</p>
                   </div>
                   <div>
                     <p className="font-medium">3 потенциальных совпадения</p>
-                    <p className="text-muted-foreground">Найдено в нашей базе данных</p>
+                    <p className="text-sm text-muted-foreground">Найдено в нашей базе данных</p>
                   </div>
+                  {/* Информация о правах пользователя */}
+                  {canModify && (
+                    <div className="pt-3 border-t">
+                      {isSuperuser && !isOwner && (
+                        <p className="text-sm font-medium text-purple-600">👑 Вы администратор</p>
+                      )}
+                      {isOwner && (
+                        <p className="text-sm font-medium text-green-600">Вы владелец этого объявления</p>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        {isEditMode 
+                          ? 'Режим редактирования активен' 
+                          : 'Можете редактировать или удалить это объявление'}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
-          </div>
-        </div>
-
-        {/* Similar Pets */}
-        <div className="mt-12">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl">Похожие питомцы в районе</h2>
-            <Button 
-              variant="outline"
-              onClick={() => onNavigate('similar')}
-            >
-              Посмотреть все совпадения
-            </Button>
-          </div>
-          
-          <div className="text-center py-8 text-muted-foreground">
-            <svg className="h-12 w-12 mx-auto mb-4 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="4" r="2"/>
-              <circle cx="18" cy="8" r="2"/>
-              <circle cx="13" cy="19" r="2"/>
-              <circle cx="6" cy="19" r="2"/>
-              <circle cx="20" cy="16" r="2"/>
-              <path d="m9 10 3 3 3-3"/>
-            </svg>
-            <p>Здесь будут показаны похожие питомцы на основе местоположения и характеристик.</p>
           </div>
         </div>
       </div>

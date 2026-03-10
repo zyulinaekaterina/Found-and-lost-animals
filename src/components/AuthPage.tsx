@@ -5,9 +5,10 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Alert, AlertDescription } from "./ui/alert";
+import axios from 'axios';
 
 interface AuthPageProps {
-  onLogin: (user: any) => void;
+  onLogin: (user: any, accessToken: string, refreshToken: string) => void; // Изменено!
 }
 
 export function AuthPage({ onLogin }: AuthPageProps) {
@@ -31,19 +32,26 @@ export function AuthPage({ onLogin }: AuthPageProps) {
     setLoading(true);
     setError('');
 
-    // Имитация входа в систему
-    setTimeout(() => {
-      if (loginData.email && loginData.password) {
-        onLogin({
-          id: 1,
-          name: "Пользователь",
-          email: loginData.email
-        });
-      } else {
-        setError('Пожалуйста, заполните все поля');
-      }
+    try {
+      const response = await axios.post('/api/auth/login', {
+        email: loginData.email,
+        password: loginData.password,
+      });
+
+      const { access_token, refresh_token, user } = response.data;
+
+      // Сохраняем оба токена
+      localStorage.setItem('token', access_token);
+      localStorage.setItem('refresh_token', refresh_token);
+
+      // Передаём пользователя и токены в App.tsx
+      onLogin(user, access_token, refresh_token);
+    } catch (err: any) {
+      console.error('Login error:', err);
+      setError(err.response?.data?.detail || 'Ошибка при входе');
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -57,19 +65,25 @@ export function AuthPage({ onLogin }: AuthPageProps) {
       return;
     }
 
-    // Имитация регистрации
-    setTimeout(() => {
-      if (registerData.name && registerData.email && registerData.password) {
-        onLogin({
-          id: 1,
-          name: registerData.name,
-          email: registerData.email
-        });
-      } else {
-        setError('Пожалуйста, заполните все поля');
-      }
+    try {
+      const response = await axios.post('/api/auth/register', {
+        name: registerData.name,
+        email: registerData.email,
+        password: registerData.password,
+      });
+
+      const { access_token, refresh_token, user } = response.data;
+
+      localStorage.setItem('token', access_token);
+      localStorage.setItem('refresh_token', refresh_token);
+      
+      onLogin(user, access_token, refresh_token);
+    } catch (err: any) {
+      console.error('Register error:', err);
+      setError(err.response?.data?.detail || 'Ошибка при регистрации');
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   return (

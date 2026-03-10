@@ -1,10 +1,36 @@
-import { useState } from "react";
+import { useState, useEffect } from "react"; // Добавлен useEffect для потенциальной инициализации
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Badge } from "./ui/badge";
+import axios from 'axios';
 import { AnimalCard } from "./AnimalCard";
+
+// Добавляем токен ко всем запросам
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Типы данных, возвращаемые с бэкенда (AnimalModel)
+interface Animal {
+  id: number;
+  name: string;
+  type: 'dog' | 'cat' | 'other';
+  status: 'lost' | 'found';
+  color: string;
+  location: string;
+  description: string;
+  created_at: string; // ISO-строка даты
+  breed?: string;
+  contact_name: string;
+  contact_phone: string;
+  contact_email: string;
+  image_url: string; 
+}
 
 interface User {
   id: number;
@@ -17,328 +43,246 @@ interface SimilarAnimalsPageProps {
   user: User;
 }
 
+// Вспомогательная функция для форматирования даты
+const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
 export function SimilarAnimalsPage({ onNavigate, user }: SimilarAnimalsPageProps) {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [locationFilter, setLocationFilter] = useState("");
+  // Состояние для загрузки файла
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
 
-  // Демонстрационные данные похожих животных
-  const similarAnimals = [
-    {
-      id: "1",
-      name: "Макс",
-      type: "dog" as const,
-      status: "lost" as const,
-      breed: "Золотистый ретривер",
-      color: "Рыжий",
-      location: "Центральный парк, Москва",
-      dateReported: "15 янв, 2025",
-      description: "Дружелюбный золотистый ретривер, любит играть в мяч. На нем красный ошейник с биркой.",
-      imageUrl: "https://images.unsplash.com/photo-1754499265662-a1b9367c95f9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjdXRlJTIwZ29sZGVuJTIwcmV0cmlldmVyJTIwZG9nfGVufDF8fHx8MTc1ODE4MTc2OHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      contactInfo: "+7 (999) 123-45-67"
-    },
-    {
-      id: "2",
-      name: "Луна",
-      type: "cat" as const,
-      status: "found" as const,
-      breed: "Полосатая",
-      color: "Рыжая",
-      location: "Арбат, Москва",
-      dateReported: "14 янв, 2025",
-      description: "Милая полосатая кошка найдена возле набережной. Очень дружелюбная и ухоженная.",
-      imageUrl: "https://images.unsplash.com/photo-1625192494235-21e8821040c1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0YWJieSUyMGNhdCUyMHBvcnRyYWl0fGVufDF8fHx8MTc1ODE2MTY0NXww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      contactInfo: "+7 (999) 987-65-43"
-    },
-    {
-      id: "3",
-      name: "Бадди",
-      type: "dog" as const,
-      status: "lost" as const,
-      breed: "Лабрадор-метис",
-      color: "Коричневый",
-      location: "Сокольники, Москва",
-      dateReported: "13 янв, 2025",
-      description: "Собака среднего размера коричневого лабрадора-метиса. Очень энергичный и дружелюбный.",
-      imageUrl: "https://images.unsplash.com/photo-1531263939119-4022c6cf273b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxsb3N0JTIwZG9nJTIwcG9zdGVyfGVufDF8fHx8MTc1ODEzNDk0OHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      contactInfo: "+7 (999) 456-78-90"
-    },
-    {
-      id: "4",
-      name: "Мило",
-      type: "cat" as const,
-      status: "found" as const,
-      breed: "Персидская",
-      color: "Белый",
-      location: "Измайлово, Москва",
-      dateReported: "12 янв, 2025",
-      description: "Красивая белая персидская кошка найдена в жилом районе. Ухоженная и ласковая.",
-      imageUrl: "https://images.unsplash.com/photo-1506199595715-82342b9198a4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxoYXBweSUyMHBldHMlMjBhbmltYWxzfGVufDF8fHx8MTc1ODIxNzAwMHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      contactInfo: "+7 (999) 321-09-87"
-    },
-    {
-      id: "5",
-      name: "Рокки",
-      type: "dog" as const,
-      status: "lost" as const,
-      breed: "Немецкая овчарка",
-      color: "Черно-рыжий",
-      location: "Марьино, Москва",
-      dateReported: "11 янв, 2025",
-      description: "Крупная немецкая овчарка с характерными отметинами. Очень верный и защитный.",
-      imageUrl: "https://images.unsplash.com/photo-1754499265662-a1b9367c95f9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjdXRlJTIwZ29sZGVuJTIwcmV0cmlldmVyJTIwZG9nfGVufDF8fHx8MTc1ODE4MTc2OHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      contactInfo: "+7 (999) 654-32-10"
-    },
-    {
-      id: "6",
-      name: "Усик",
-      type: "cat" as const,
-      status: "found" as const,
-      breed: "Мейн-кун",
-      color: "Рыжий",
-      location: "Бутово, Москва",
-      dateReported: "10 янв, 2025",
-      description: "Крупный рыжий мейн-кун. Очень пушистый и дружелюбный с характерным мяуканьем.",
-      imageUrl: "https://images.unsplash.com/photo-1625192494235-21e8821040c1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0YWJieSUyMGNhdCUyMHBvcnRyYWl0fGVufDF8fHx8MTc1ODE2MTY0NXww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      contactInfo: "+7 (999) 789-01-23"
+  // Состояние для результатов поиска
+  const [similarAnimals, setSimilarAnimals] = useState<Animal[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Состояние для фильтров
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+
+  // Инициализация при монтировании: сразу загружаем общий список
+  useEffect(() => {
+    handleSearch(true); // Вызываем поиск при загрузке страницы, чтобы показать все объявления
+  }, []);
+
+  // Обновление превью при выборе файла
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setUploadedFile(file);
+    if (file) {
+      setUploadedImagePreview(URL.createObjectURL(file));
+    } else {
+      setUploadedImagePreview(null);
     }
-  ];
+    setError(null);
+  };
 
-  // Фильтрация животных по критериям поиска
+  // 1. Поиск по изображению
+  const handleImageSearch = async () => {
+    if (!uploadedFile) return; // Проверка на всякий случай
+
+    setLoading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append('file', uploadedFile);
+
+    try {
+      // POST запрос для поиска по изображению
+      const response = await axios.post('/api/animals/search_similar', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      setSimilarAnimals(response.data.animals || []);
+
+    } catch (err: any) {
+      console.error('Image Search error:', err);
+      const errorMessage = err.response?.data?.detail || err.message || 'Ошибка сети или сервера';
+      setError(`Ошибка поиска по изображению: ${errorMessage}`);
+      setSimilarAnimals([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // 2. Общий поиск (по умолчанию)
+  const handleGeneralSearch = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+        // GET запрос для получения всего списка (который мы будем фильтровать локально)
+        const response = await axios.get('/api/animals/'); 
+        setSimilarAnimals(response.data.animals || []);
+    } catch (err: any) {
+        console.error('General search error:', err);
+        const errorMessage = err.response?.data?.detail || err.message || 'Ошибка сети или сервера';
+        setError(`Ошибка загрузки списка животных: ${errorMessage}`);
+        setSimilarAnimals([]);
+    } finally {
+        setLoading(false);
+    }
+  }
+
+  // 3. Единый обработчик поиска
+  const handleSearch = async (isInitialLoad = false) => {
+    if (uploadedFile) {
+        await handleImageSearch();
+    } else {
+        // Если нет файла, выполняем общий поиск.
+        // Это также происходит при первой загрузке страницы.
+        await handleGeneralSearch();
+    }
+  };
+
+  // Локальная фильтрация результатов
   const filteredAnimals = similarAnimals.filter(animal => {
-    const matchesSearch = searchTerm === "" || 
-      animal.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      animal.breed.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      animal.description.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = statusFilter === "all" || animal.status === statusFilter;
-    const matchesType = typeFilter === "all" || animal.type === typeFilter;
-    const matchesLocation = locationFilter === "" || 
-      animal.location.toLowerCase().includes(locationFilter.toLowerCase());
-
-    return matchesSearch && matchesStatus && matchesType && matchesLocation;
+    if (statusFilter !== 'all' && animal.status !== statusFilter) return false;
+    if (typeFilter !== 'all' && animal.type !== typeFilter) return false;
+    return true;
   });
 
-  const handleViewDetails = (animalId: string) => {
-    console.log('Просмотр деталей для:', animalId);
-    onNavigate('info');
-  };
-
-  const handleContact = (animalId: string) => {
-    const animal = similarAnimals.find(a => a.id === animalId);
-    if (animal) {
-      alert(`Контакт для ${animal.name}: ${animal.contactInfo}`);
-    }
-  };
 
   return (
-    <div className="min-h-screen bg-secondary/10">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-3xl text-primary mb-2">
-                Похожие животные найдены
-              </h1>
-              <p className="text-muted-foreground">
-                {filteredAnimals.length} животных соответствуют вашим критериям поиска
-              </p>
-            </div>
-            <Button 
-              variant="outline"
-              onClick={() => onNavigate('upload')}
-            >
-              Добавить питомца
-            </Button>
-          </div>
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">
+          Поиск животных (по фото или по каталогу)
+        </h1>
 
-          {/* Search and Filters */}
-          <Card>
+        <div className="grid lg:grid-cols-3 gap-8 mb-10">
+          {/* Секция Загрузки */}
+          <Card className="lg:col-span-1 h-fit sticky top-4">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="4" x2="4" y1="21" y2="14"/>
-                  <line x1="4" x2="4" y1="10" y2="3"/>
-                  <line x1="12" x2="12" y1="21" y2="12"/>
-                  <line x1="12" x2="12" y1="8" y2="3"/>
-                  <line x1="20" x2="20" y1="21" y2="16"/>
-                  <line x1="20" x2="20" y1="12" y2="3"/>
-                  <line x1="1" x2="7" y1="14" y2="14"/>
-                  <line x1="9" x2="15" y1="8" y2="8"/>
-                  <line x1="17" x2="23" y1="16" y2="16"/>
-                </svg>
-                Поиск и фильтры
-              </CardTitle>
+              <CardTitle>Поиск по изображению (опционально)</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Поиск</label>
-                  <div className="relative">
-                    <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="11" cy="11" r="8"/>
-                      <path d="m21 21-4.35-4.35"/>
-                    </svg>
-                    <Input
-                      placeholder="Кличка, порода, описание..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Статус</label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Все статусы</SelectItem>
-                      <SelectItem value="lost">Только потерянные</SelectItem>
-                      <SelectItem value="found">Только найденные</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Тип питомца</label>
-                  <Select value={typeFilter} onValueChange={setTypeFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Все типы</SelectItem>
-                      <SelectItem value="dog">Собаки</SelectItem>
-                      <SelectItem value="cat">Кошки</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Местоположение</label>
-                  <div className="relative">
-                    <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                      <circle cx="12" cy="10" r="3"/>
-                    </svg>
-                    <Input
-                      placeholder="Район..."
-                      value={locationFilter}
-                      onChange={(e) => setLocationFilter(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </div>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Input
+                  id="file-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                />
               </div>
+
+              {uploadedImagePreview ? (
+                <div className="relative border-2 border-dashed border-gray-300 rounded-lg p-2">
+                  <img 
+                    src={uploadedImagePreview} 
+                    alt="Предпросмотр" 
+                    className="w-full h-auto max-h-60 object-contain rounded-md"
+                  />
+                </div>
+              ) : (
+                <div className="h-40 flex items-center justify-center bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg text-gray-500">
+                  Нет выбранного изображения
+                </div>
+              )}
+
+              <Button 
+                onClick={() => handleSearch(false)} // Кнопка вызывает общий поиск, даже если нет фото
+                className="w-full" 
+                disabled={loading} // Теперь кнопка всегда активна, если нет загрузки
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Поиск...
+                  </>
+                ) : uploadedFile ? 'Найти похожих питомцев' : 'Обновить список / Искать'}
+              </Button>
+              
+              {error && (
+                <div className="text-red-600 text-sm mt-2 p-2 bg-red-50 rounded">
+                  {error}
+                </div>
+              )}
             </CardContent>
           </Card>
-        </div>
 
-        {/* Results Stats */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <Badge variant="secondary" className="text-sm">
-              {filteredAnimals.filter(a => a.status === 'lost').length} Потерянных
-            </Badge>
-            <Badge variant="secondary" className="text-sm">
-              {filteredAnimals.filter(a => a.status === 'found').length} Найденных
-            </Badge>
-            <Badge variant="secondary" className="text-sm">
-              {filteredAnimals.filter(a => a.type === 'dog').length} Собак
-            </Badge>
-            <Badge variant="secondary" className="text-sm">
-              {filteredAnimals.filter(a => a.type === 'cat').length} Кошек
-            </Badge>
-          </div>
-          
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M8 2v4"/>
-              <path d="M16 2v4"/>
-              <rect width="18" height="18" x="3" y="4" rx="2"/>
-              <path d="M3 10h18"/>
-            </svg>
-            <span>Обновляется ежедневно</span>
-          </div>
-        </div>
-
-        {/* Animal Grid */}
-        {filteredAnimals.length > 0 ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredAnimals.map((animal) => (
-              <AnimalCard
-                key={animal.id}
-                id={animal.id}
-                name={animal.name}
-                type={animal.type}
-                status={animal.status}
-                breed={animal.breed}
-                color={animal.color}
-                location={animal.location}
-                dateReported={animal.dateReported}
-                description={animal.description}
-                imageUrl={animal.imageUrl}
-                contactInfo={animal.contactInfo}
-                onViewDetails={() => handleViewDetails(animal.id)}
-                onContact={() => handleContact(animal.id)}
-                size="small"
-              />
-            ))}
-          </div>
-        ) : (
-          <Card className="text-center py-12">
-            <CardContent>
-              <svg className="h-16 w-16 text-muted-foreground mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"/>
-                <path d="m21 21-4.35-4.35"/>
-              </svg>
-              <h3 className="text-xl mb-2">Животные не найдены</h3>
-              <p className="text-muted-foreground mb-6">
-                Попробуйте изменить фильтры поиска или проверьте позже новые объявления.
-              </p>
-              <div className="flex gap-4 justify-center">
-                <Button onClick={() => {
-                  setSearchTerm("");
-                  setStatusFilter("all");
-                  setTypeFilter("all");
-                  setLocationFilter("");
-                }}>
-                  Очистить фильтры
-                </Button>
-                <Button variant="outline" onClick={() => onNavigate('upload')}>
-                  Добавить питомца
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Pagination (placeholder) */}
-        {filteredAnimals.length > 0 && (
-          <div className="flex justify-center mt-12">
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled>
-                Предыдущая
-              </Button>
-              <Button variant="default" size="sm">
-                1
-              </Button>
-              <Button variant="outline" size="sm">
-                2
-              </Button>
-              <Button variant="outline" size="sm">
-                3
-              </Button>
-              <Button variant="outline" size="sm">
-                Следующая
-              </Button>
+          {/* Секция Результатов */}
+          <div className="lg:col-span-2">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-4">
+                <h2 className="text-xl font-semibold text-gray-800">
+                    {uploadedFile ? 'Результаты поиска по фото' : 'Объявления в каталоге'} ({filteredAnimals.length})
+                </h2>
+                <div className="flex gap-2">
+                    {/* При изменении фильтров нужно обновить список, но сейчас мы фильтруем локально */}
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="w-[120px]">
+                            <SelectValue placeholder="Статус" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Все статусы</SelectItem>
+                            <SelectItem value="lost">Потерян</SelectItem>
+                            <SelectItem value="found">Найден</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Select value={typeFilter} onValueChange={setTypeFilter}>
+                        <SelectTrigger className="w-[120px]">
+                            <SelectValue placeholder="Тип" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Все типы</SelectItem>
+                            <SelectItem value="dog">Собака</SelectItem>
+                            <SelectItem value="cat">Кошка</SelectItem>
+                            <SelectItem value="other">Другое</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
+
+            {loading && <p className="text-center py-8">Идет загрузка объявлений...</p>}
+
+            {!loading && similarAnimals.length === 0 && !error && (
+              <Card className="text-center p-10">
+                <CardContent className="space-y-4">
+                  <h3 className="text-lg font-medium">Нет результатов</h3>
+                  <p className="text-muted-foreground">
+                    Пожалуйста, загрузите изображение для поиска или нажмите кнопку "Обновить список" для просмотра всего каталога.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {!loading && filteredAnimals.length > 0 && (
+              <div className="grid sm:grid-cols-2 gap-6">
+                {/* Использование AnimalCard для каждого результата */}
+                {filteredAnimals.map((animal) => (
+                  <AnimalCard 
+                    key={animal.id}
+                    id={String(animal.id)} 
+                    name={animal.name || 'Не указано'}
+                    type={animal.type}
+                    status={animal.status}
+                    breed={animal.breed || 'Не указана'}
+                    color={animal.color}
+                    location={animal.location}
+                    dateReported={formatDate(animal.created_at)}
+                    description={animal.description || 'Нет описания'}
+                    imageUrl={`/api/animals/image/${animal.id}`} 
+                    contactInfo={`Имя: ${animal.contact_name}, Email: ${animal.contact_email}`}
+                    onViewDetails={() => onNavigate(`animal/${animal.id}`)}
+                  />
+                ))}
+              </div>
+            )}
+            
+            {!loading && similarAnimals.length > 0 && filteredAnimals.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                Нет результатов, соответствующих выбранным фильтрам.
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

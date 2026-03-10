@@ -1,12 +1,20 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Badge } from "./ui/badge";
-import { Alert, AlertDescription } from "./ui/alert";
+import axios from 'axios';
+
+// Добавляем токен ко всем запросам
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 interface User {
   id: number;
@@ -19,312 +27,319 @@ interface UploadPageProps {
   user: User;
 }
 
+interface FormDataState {
+  petName: string;
+  petType: 'dog' | 'cat' | 'other' | '';
+  breed: string;
+  color: string;
+  size: 'small' | 'medium' | 'large' | '';
+  status: 'lost' | 'found';
+  location: string;
+  description: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+}
+
 export function UploadPage({ onNavigate, user }: UploadPageProps) {
-  const [formData, setFormData] = useState({
+  // Инициализация данных с использованием данных пользователя по умолчанию
+  const [formData, setFormData] = useState<FormDataState>({
     petName: '',
     petType: '',
     breed: '',
     color: '',
     size: '',
-    status: 'found', // По умолчанию "найден", так как это сайт для найденных питомцев
+    status: 'found',
     location: '',
-    date: '',
     description: '',
     contactName: user.name,
     contactPhone: '',
     contactEmail: user.email
   });
 
-  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
+  // Универсальный обработчик для текстовых полей
+  const handleInputChange = useCallback((name: keyof FormDataState, value: string) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
+  }, []);
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  // Обработчик для выбора файла
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setUploadedFile(file);
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setUploadedImage(e.target?.result as string);
-      };
-      reader.readAsDataURL(file);
+      setUploadedImagePreview(URL.createObjectURL(file));
+    } else {
+      setUploadedImagePreview(null);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // --- КЛЮЧЕВАЯ ФУНКЦИЯ: Отправка данных с файлом ---
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!uploadedFile) {
+      setError("Пожалуйста, загрузите фотографию питомца.");
+      return;
+    }
+    if (!formData.petName || !formData.petType || !formData.size || !formData.location || !formData.contactName || !formData.contactEmail) {
+        setError("Пожалуйста, заполните все обязательные поля.");
+        return;
+    }
+
     setIsProcessing(true);
+    setError(null);
+
+    // 1. Создаем объект FormData для отправки
+    const data = new FormData();
     
-    // Имитация обработки изображения
-    setTimeout(() => {
-      console.log('Форма отправлена:', formData);
+    // 2. Добавляем файл
+    data.append('file', uploadedFile); 
+    
+    // 3. Добавляем все остальные текстовые поля (должны совпадать с аргументами FastAPI)
+    data.append('name', formData.petName);
+    data.append('type', formData.petType);
+    data.append('status', formData.status);
+    data.append('breed', formData.breed);
+    data.append('color', formData.color);
+    data.append('size', formData.size);
+    data.append('location', formData.location);
+    data.append('description', formData.description);
+    data.append('contact_name', formData.contactName);
+    data.append('contact_phone', formData.contactPhone);
+    data.append('contact_email', formData.contactEmail);
+
+
+    try {
+      // Отправляем FormData на маршрут POST /api/animals/
+      // Axios автоматически установит Content-Type: multipart/form-data
+      await axios.post('/api/animals/', data);
+
+      alert("Объявление успешно добавлено!");
+      onNavigate('home'); // Перенаправляем на главную после успеха
+
+    } catch (err: any) {
+      console.error('Upload error:', err.response || err);
+      const detail = err.response?.data?.detail || 'Неизвестная ошибка сервера.';
+      setError(`Ошибка при добавлении: ${detail}`);
+    } finally {
       setIsProcessing(false);
-      // Перенаправление на страницу с похожими животными
-      onNavigate('similar');
-    }, 2000);
+    }
   };
+  // --- КОНЕЦ КЛЮЧЕВОЙ ФУНКЦИИ ---
+
 
   return (
-    <div className="min-h-screen bg-secondary/10 py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl text-primary mb-4">
-            Загрузить найденного питомца
-          </h1>
-          <p className="text-muted-foreground max-w-2xl mx-auto">
-            Загрузите фотографию найденного питомца и укажите детали. Наша система автоматически 
-            найдет похожих животных в базе данных потерянных питомцев.
-          </p>
-        </div>
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">
+          Разместить объявление о пропаже или находке
+        </h1>
 
         <form onSubmit={handleSubmit} className="space-y-8">
-          {/* Pet Status */}
+          
+          {/* 1. Секция ФОТОГРАФИЯ */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" x2="12" y1="8" y2="12"/>
-                  <line x1="12" x2="12.01" y1="16" y2="16"/>
-                </svg>
-                Информация о находке
-              </CardTitle>
+              <CardTitle>1. Фотография питомца</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Статус питомца</Label>
-                  <Select value={formData.status} onValueChange={(value) => handleInputChange('status', value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите статус" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="found">Найден</SelectItem>
-                      <SelectItem value="lost">Потерян</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Дата</Label>
-                  <Input
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => handleInputChange('date', e.target.value)}
-                    placeholder="Когда это произошло?"
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="file-upload">Загрузить фото *</Label>
+                <Input
+                  id="file-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                />
+              </div>
+
+              {uploadedImagePreview && (
+                <div className="relative border-2 border-dashed border-gray-300 rounded-lg p-2">
+                  <img 
+                    src={uploadedImagePreview} 
+                    alt="Предпросмотр" 
+                    className="w-full h-auto max-h-60 object-contain rounded-md"
                   />
                 </div>
+              )}
+            </CardContent>
+          </Card>
+          
+          {/* 2. Секция ОСНОВНАЯ ИНФОРМАЦИЯ */}
+          <Card>
+            <CardHeader>
+              <CardTitle>2. Основная информация</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              <div className="space-y-2">
+                <Label htmlFor="petName">Кличка (если известна) *</Label>
+                <Input
+                  id="petName"
+                  value={formData.petName}
+                  onChange={(e) => handleInputChange('petName', e.target.value)}
+                  placeholder="Макс, Рыжик, ... (или Неизвестна)"
+                  required
+                />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="petType">Тип животного *</Label>
+                <Select
+                    value={formData.petType}
+                    onValueChange={(value: 'dog' | 'cat' | 'other') => handleInputChange('petType', value)}
+                    required
+                >
+                    <SelectTrigger id="petType">
+                        <SelectValue placeholder="Выберите тип" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="dog">Собака</SelectItem>
+                        <SelectItem value="cat">Кошка</SelectItem>
+                        <SelectItem value="other">Другое</SelectItem>
+                    </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="breed">Порода</Label>
+                <Input
+                  id="breed"
+                  value={formData.breed}
+                  onChange={(e) => handleInputChange('breed', e.target.value)}
+                  placeholder="Например: Лабрадор, Мейн-кун"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="color">Основной цвет *</Label>
+                <Input
+                  id="color"
+                  value={formData.color}
+                  onChange={(e) => handleInputChange('color', e.target.value)}
+                  placeholder="Например: Черный, Трехцветный"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="size">Размер *</Label>
+                <Select
+                    value={formData.size}
+                    onValueChange={(value: 'small' | 'medium' | 'large') => handleInputChange('size', value)}
+                    required
+                >
+                    <SelectTrigger id="size">
+                        <SelectValue placeholder="Выберите размер" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="small">Маленький (до 5 кг)</SelectItem>
+                        <SelectItem value="medium">Средний (5-20 кг)</SelectItem>
+                        <SelectItem value="large">Крупный (более 20 кг)</SelectItem>
+                    </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="status">Статус *</Label>
+                <Select
+                    value={formData.status}
+                    onValueChange={(value: 'lost' | 'found') => handleInputChange('status', value)}
+                    required
+                >
+                    <SelectTrigger id="status">
+                        <SelectValue placeholder="Статус" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="lost">Потерян</SelectItem>
+                        <SelectItem value="found">Найден</SelectItem>
+                    </SelectContent>
+                </Select>
+              </div>
+
             </CardContent>
           </Card>
 
-          {/* Photo Upload */}
+          {/* 3. Секция ЛОКАЦИЯ И ОПИСАНИЕ */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
-                  <circle cx="12" cy="13" r="3"/>
-                </svg>
-                Фотография питомца
-              </CardTitle>
+              <CardTitle>3. Локация и описание</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
-                  {uploadedImage ? (
-                    <div className="space-y-4">
-                      <img 
-                        src={uploadedImage} 
-                        alt="Загруженная фотография питомца" 
-                        className="max-w-full h-64 object-cover mx-auto rounded-lg"
-                      />
-                      <Button variant="outline" onClick={() => setUploadedImage(null)}>
-                        Изменить фото
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <svg className="h-12 w-12 text-muted-foreground mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7,10 12,15 17,10"/>
-                        <line x1="12" x2="12" y1="15" y2="3"/>
-                      </svg>
-                      <div>
-                        <Label 
-                          htmlFor="photo-upload" 
-                          className="cursor-pointer inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90"
-                        >
-                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
-                            <circle cx="12" cy="13" r="3"/>
-                          </svg>
-                          Загрузить фото
-                        </Label>
-                        <Input
-                          id="photo-upload"
-                          type="file"
-                          accept="image/*"
-                          onChange={handleImageUpload}
-                          className="hidden"
-                        />
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Загрузите четкую фотографию питомца. JPG, PNG до 10МБ.
-                      </p>
-                    </div>
-                  )}
+            <CardContent className="space-y-6">
+                <div className="space-y-2">
+                    <Label htmlFor="location">Место пропажи/находки *</Label>
+                    <Input
+                        id="location"
+                        value={formData.location}
+                        onChange={(e) => handleInputChange('location', e.target.value)}
+                        placeholder="Улица, район, город"
+                        required
+                    />
                 </div>
                 
-                <Alert>
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="12" x2="12" y1="8" y2="12"/>
-                    <line x1="12" x2="12.01" y1="16" y2="16"/>
-                  </svg>
-                  <AlertDescription>
-                    Качественная фотография критически важна для идентификации. Постарайтесь включить морду питомца и отличительные признаки.
-                  </AlertDescription>
-                </Alert>
-              </div>
+                <div className="space-y-2">
+                    <Label htmlFor="description">Описание и приметы</Label>
+                    <Textarea
+                        id="description"
+                        value={formData.description}
+                        onChange={(e) => handleInputChange('description', e.target.value)}
+                        placeholder="Особые приметы (ошейник, шрамы, поведение) и детали случившегося."
+                        rows={4}
+                    />
+                </div>
             </CardContent>
           </Card>
 
-          {/* Pet Details */}
+          {/* 4. Секция КОНТАКТЫ */}
           <Card>
             <CardHeader>
-              <CardTitle>Информация о питомце</CardTitle>
+              <CardTitle>4. Контактная информация</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Кличка питомца (если известна)</Label>
-                  <Input
-                    value={formData.petName}
-                    onChange={(e) => handleInputChange('petName', e.target.value)}
-                    placeholder="например, Макс, Белла, Неизвестно"
-                  />
-                </div>
-                <div>
-                  <Label>Тип животного</Label>
-                  <Select value={formData.petType} onValueChange={(value) => handleInputChange('petType', value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите тип" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="dog">Собака</SelectItem>
-                      <SelectItem value="cat">Кот</SelectItem>
-                      <SelectItem value="bird">Птица</SelectItem>
-                      <SelectItem value="rabbit">Кролик</SelectItem>
-                      <SelectItem value="other">Другое</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-4">
-                <div>
-                  <Label>Порода (если известна)</Label>
-                  <Input
-                    value={formData.breed}
-                    onChange={(e) => handleInputChange('breed', e.target.value)}
-                    placeholder="например, Золотистый ретривер, Метис"
-                  />
-                </div>
-                <div>
-                  <Label>Основной окрас</Label>
-                  <Input
-                    value={formData.color}
-                    onChange={(e) => handleInputChange('color', e.target.value)}
-                    placeholder="например, Рыжий, Черный, Серый"
-                  />
-                </div>
-                <div>
-                  <Label>Размер</Label>
-                  <Select value={formData.size} onValueChange={(value) => handleInputChange('size', value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите размер" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="small">Маленький (до 11 кг)</SelectItem>
-                      <SelectItem value="medium">Средний (11-27 кг)</SelectItem>
-                      <SelectItem value="large">Большой (свыше 27 кг)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div>
-                <Label>Описание</Label>
-                <Textarea
-                  value={formData.description}
-                  onChange={(e) => handleInputChange('description', e.target.value)}
-                  placeholder="Укажите дополнительные детали о внешности, поведении или обстоятельствах..."
-                  rows={4}
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="contactName">Ваше имя *</Label>
+                <Input
+                  id="contactName"
+                  value={formData.contactName}
+                  onChange={(e) => handleInputChange('contactName', e.target.value)}
+                  placeholder="Ваше имя"
+                  required
                 />
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Location */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                  <circle cx="12" cy="10" r="3"/>
-                </svg>
-                Информация о местоположении
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div>
-                <Label>Место (где был найден/потерян питомец)</Label>
+              <div className="space-y-2">
+                <Label htmlFor="contactPhone">Телефон (для связи)</Label>
                 <Input
-                  value={formData.location}
-                  onChange={(e) => handleInputChange('location', e.target.value)}
-                  placeholder="например, Центральный парк, ул. Ленина 123, Арбат"
+                  id="contactPhone"
+                  value={formData.contactPhone}
+                  onChange={(e) => handleInputChange('contactPhone', e.target.value)}
+                  placeholder="+7 (999) 999-99-99"
                 />
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Contact Information */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Контактная информация</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <Label>Ваше имя</Label>
-                  <Input
-                    value={formData.contactName}
-                    onChange={(e) => handleInputChange('contactName', e.target.value)}
-                    placeholder="Полное имя"
-                  />
-                </div>
-                <div>
-                  <Label>Номер телефона</Label>
-                  <Input
-                    value={formData.contactPhone}
-                    onChange={(e) => handleInputChange('contactPhone', e.target.value)}
-                    placeholder="+7 (999) 666-66-66"
-                  />
-                </div>
-              </div>
-              <div>
-                <Label>Адрес электронной почты</Label>
+              <div className="space-y-2">
+                <Label htmlFor="contactEmail">Email *</Label>
                 <Input
+                  id="contactEmail"
                   type="email"
                   value={formData.contactEmail}
                   onChange={(e) => handleInputChange('contactEmail', e.target.value)}
                   placeholder="your.email@example.com"
+                  required
                 />
               </div>
             </CardContent>
           </Card>
+
+          {/* Error Alert */}
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 p-3 rounded text-sm">
+              {error}
+            </div>
+          )}
 
           {/* Submit Button */}
           <div className="flex justify-center space-x-4">
@@ -339,15 +354,13 @@ export function UploadPage({ onNavigate, user }: UploadPageProps) {
             <Button type="submit" className="px-8" disabled={isProcessing}>
               {isProcessing ? (
                 <>
-                  <svg className="animate-spin -ml-1 mr-3 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <svg className="animate-spin -ml-1 mr-3 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Обработка изображения...
+                  Обработка...
                 </>
-              ) : (
-                'Найти похожих питомцев'
-              )}
+              ) : 'Опубликовать объявление'}
             </Button>
           </div>
         </form>

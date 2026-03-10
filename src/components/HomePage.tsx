@@ -1,12 +1,34 @@
+import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
+import axios from 'axios';
 import { ImageWithFallback } from "./figma/ImageWithFallback";
+
+// Добавляем токен ко всем запросам
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+interface Animal {
+  id: number;
+  name: string;
+  type: string;
+  status: string;
+  color: string;
+  location: string;
+  created_at: string;
+}
 
 interface User {
   id: number;
   name: string;
   email: string;
+  is_superuser?: boolean; // Добавляем поле для админа
 }
 
 interface HomePageProps {
@@ -15,11 +37,68 @@ interface HomePageProps {
 }
 
 export function HomePage({ onNavigate, user }: HomePageProps) {
+  const [animals, setAnimals] = useState<Animal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchMyAnimals = async () => {
+      try {
+        const response = await axios.get('/api/animals/me');
+        const data = response.data;
+        setAnimals(data.animals || []); 
+      } catch (err: any) {
+        console.error('Ошибка загрузки животных:', err);
+        const errorMessage = err.response?.data?.detail || err.message || 'Ошибка сети';
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMyAnimals();
+  }, []);
+
+  const getStatusBadge = (status: string) => {
+    if (status === 'lost') return { variant: 'destructive', text: 'ПОТЕРЯН' };
+    if (status === 'found') return { variant: 'default' as const, text: 'НАЙДЕН' };
+    return { variant: 'secondary' as const, text: status };
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffHours < 1) return 'только что';
+    if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? 'час' : diffHours < 5 ? 'часа' : 'часов'} назад`;
+    return `${diffDays} ${diffDays === 1 ? 'день' : diffDays < 5 ? 'дня' : 'дней'} назад`;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-secondary/20">
       {/* Hero Section */}
       <section className="relative py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto text-center">
+          {/* Кнопка админ-панели для суперпользователя */}
+          {user.is_superuser && (
+            <div className="absolute top-4 right-4 lg:top-8 lg:right-8">
+              <Button 
+                variant="outline" 
+                onClick={() => onNavigate('admin')}
+                className="bg-white shadow-lg hover:shadow-xl transition-shadow"
+              >
+                <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+                Управление пользователями
+              </Button>
+            </div>
+          )}
+
           <div className="flex justify-center mb-6">
             <svg className="h-16 w-16 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
@@ -28,6 +107,11 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
           
           <h1 className="text-4xl sm:text-5xl lg:text-6xl mb-6 text-primary">
             Добро пожаловать, {user.name}!
+            {user.is_superuser && (
+              <span className="ml-4 text-lg bg-purple-100 text-purple-700 px-3 py-1 rounded-full inline-block align-middle">
+                👑 Администратор
+              </span>
+            )}
           </h1>
           
           <p className="text-xl text-muted-foreground mb-8 max-w-3xl mx-auto">
@@ -58,7 +142,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
                 <circle cx="11" cy="11" r="8"/>
                 <path d="m21 21-4.35-4.35"/>
               </svg>
-              Просмотреть питомцев
+              Найти похожих
             </Button>
           </div>
         </div>
@@ -123,107 +207,73 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
         </div>
       </section>
 
-      {/* Recent Activity */}
+      {/* Recent Activity — YOUR ANIMALS */}
       <section className="py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl text-center mb-12 text-primary">
-            Последние объявления
-          </h2>
-          
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Sample Recent Posts */}
-            <Card className="overflow-hidden">
-              <div className="relative">
-                <ImageWithFallback
-                  src="https://images.unsplash.com/photo-1754499265662-a1b9367c95f9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjdXRlJTIwZ29sZGVuJTIwcmV0cmlldmVyJTIwZG9nfGVufDF8fHx8MTc1ODE4MTc2OHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                  alt="Потерянный золотистый ретривер"
-                  className="w-full h-40 object-cover"
-                />
-                <Badge className="absolute top-2 left-2" variant="destructive">
-                  ПОТЕРЯН
-                </Badge>
-              </div>
-              <CardContent className="p-4">
-                <h3 className="font-semibold mb-2">Золотистый ретривер - Макс</h3>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                    <circle cx="12" cy="10" r="3"/>
-                  </svg>
-                  <span>Центральный парк, Москва</span>
-                </div>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12,6 12,12 16,14"/>
-                  </svg>
-                  <span>2 часа назад</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="overflow-hidden">
-              <div className="relative">
-                <ImageWithFallback
-                  src="https://images.unsplash.com/photo-1625192494235-21e8821040c1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0YWJieSUyMGNhdCUyMHBvcnRyYWl0fGVufDF8fHx8MTc1ODE2MTY0NXww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                  alt="Найденная полосатая кошка"
-                  className="w-full h-40 object-cover"
-                />
-                <Badge className="absolute top-2 left-2" variant="default">
-                  НАЙДЕН
-                </Badge>
-              </div>
-              <CardContent className="p-4">
-                <h3 className="font-semibold mb-2">Полосатая кошка</h3>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                    <circle cx="12" cy="10" r="3"/>
-                  </svg>
-                  <span>Арбат, Москва</span>
-                </div>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12,6 12,12 16,14"/>
-                  </svg>
-                  <span>5 часов назад</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="overflow-hidden">
-              <div className="relative">
-                <ImageWithFallback
-                  src="https://images.unsplash.com/photo-1506199595715-82342b9198a4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxoYXBweSUyMHBldHMlMjBhbmltYWxzfGVufDF8fHx8MTc1ODIxNzAwMHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                  alt="Счастливое воссоединение"
-                  className="w-full h-40 object-cover"
-                />
-                <Badge className="absolute top-2 left-2" variant="secondary">
-                  ВОССОЕДИНЕНЫ
-                </Badge>
-              </div>
-              <CardContent className="p-4">
-                <h3 className="font-semibold mb-2">История успеха</h3>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                    <circle cx="9" cy="7" r="4"/>
-                    <path d="m22 21-3-3"/>
-                    <circle cx="19" cy="11" r="2"/>
-                  </svg>
-                  <span>Счастливая семья</span>
-                </div>
-                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12,6 12,12 16,14"/>
-                  </svg>
-                  <span>1 день назад</span>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-3xl text-primary">Мои объявления</h2>
+            <Button variant="outline" onClick={() => onNavigate('upload')}>
+              + Добавить
+            </Button>
           </div>
+          
+          {loading ? (
+            <p className="text-center py-8">Загрузка...</p>
+          ) : error ? (
+            <div className="bg-destructive/10 text-destructive p-4 rounded text-center">
+              {error}
+            </div>
+          ) : animals.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              У вас пока нет объявлений. 
+              <Button variant="link" onClick={() => onNavigate('upload')} className="ml-2">
+                Создать первое
+              </Button>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {animals.map((animal) => {
+                const statusBadge = getStatusBadge(animal.status);
+                return (
+                  <Card 
+                    key={animal.id} 
+                    className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
+                    onClick={() => onNavigate(`animal/${animal.id}`)}
+                  >
+                    <div className="relative h-40">
+                      <ImageWithFallback
+                        src={`/api/animals/image/${animal.id}`}
+                        alt={animal.name || 'Без имени'}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <CardContent className="p-4">
+                      <h3 className="font-semibold mb-2">
+                        {animal.name || 'Без имени'} ({animal.type === 'dog' ? 'Собака' : animal.type === 'cat' ? 'Кошка' : animal.type})
+                      </h3>
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+                          <circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        <span>{animal.location}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
+                        <Badge variant={statusBadge.variant}>{statusBadge.text}</Badge>
+                      </div>
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10"/>
+                          <polyline points="12,6 12,12 16,14"/>
+                        </svg>
+                        <span>{formatTimeAgo(animal.created_at)}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
 
