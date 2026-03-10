@@ -8,7 +8,7 @@ from app.core.security import verify_password, get_password_hash, create_access_
     verify_token
 from app.core.config import settings
 from app.models.user import User
-from app.schemas.user import UserCreate, UserResponse, Token, UserLogin, RefreshTokenRequest
+from app.schemas.user import UserCreate, UserResponse, Token, UserLogin, RefreshTokenRequest, TokenWithUser
 
 router = APIRouter()
 
@@ -28,7 +28,7 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db_user = User(
         email=user_data.email,
         hashed_password=hashed_password,
-        full_name=user_data.full_name
+        name=user_data.name
     )
 
     db.add(db_user)
@@ -38,39 +38,13 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     return db_user
 
 
-# @router.post("/login", response_model=Token)
-# async def login(login_data: UserLogin, db: Session = Depends(get_db)):
-#     # Ищем пользователя
-#     user = db.query(User).filter(User.email == login_data.email).first()
-#     if not user or not verify_password(login_data.password, user.hashed_password):
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Неверный email или пароль"
-#         )
-#
-#     if not user.is_active:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Пользователь деактивирован"
-#         )
-#
-#     # Создаем токены
-#     access_token = create_access_token(data={"user_id": user.id})
-#     refresh_token = create_refresh_token(data={"user_id": user.id})
-#
-#     return {
-#         "access_token": access_token,
-#         "token_type": "bearer",
-#         "refresh_token": refresh_token
-#     }
-
-
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=TokenWithUser)
 async def login(
-        form_data: OAuth2PasswordRequestForm = Depends(),
+        # form_data: OAuth2PasswordRequestForm = Depends(),
+        form_data: UserLogin,
         db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(User.email == form_data.username).first()
+    user = db.query(User).filter(User.email == form_data.email).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -90,7 +64,8 @@ async def login(
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "refresh_token": refresh_token
+        "refresh_token": refresh_token,
+        "user": user
     }
 
 

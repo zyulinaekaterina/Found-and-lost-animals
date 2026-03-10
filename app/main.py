@@ -6,7 +6,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 #  Импортируем роуты авторизации
-from app.routes import animals, auth
+from app.routes import animals, auth, users
 
 # Создаем таблицы (включая users!)
 create_tables()
@@ -41,6 +41,8 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 
 # Существующие роуты животных
 app.include_router(animals.router, prefix="/api/animals", tags=["animals"])
+
+app.include_router(users.router, prefix="/api")
 
 @app.get("/")
 async def root():

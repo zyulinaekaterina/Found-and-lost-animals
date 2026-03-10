@@ -1,11 +1,11 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 
 class UserBase(BaseModel):
     email: EmailStr
-    full_name: str
+    name: str
 
 
 class UserCreate(UserBase):
@@ -14,8 +14,17 @@ class UserCreate(UserBase):
 
 class UserResponse(UserBase):
     id: int
+    is_superuser: bool
     is_active: bool
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserListResponse(BaseModel):
+    users: List[UserResponse]
+    total: int
 
     class Config:
         from_attributes = True
@@ -31,6 +40,9 @@ class Token(BaseModel):
     token_type: str
     refresh_token: str
 
+
+class TokenWithUser(Token):
+    user: UserResponse
 
 class TokenData(BaseModel):
     user_id: Optional[int] = None

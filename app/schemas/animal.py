@@ -44,10 +44,12 @@ class AnimalUpdate(BaseModel):
 # Для ответа API (включает ID и даты)
 class AnimalResponse(AnimalBase):
     id: int
+    owner_id: int
     date_reported: datetime
     created_at: datetime
     updated_at: datetime
     embedding: Optional[list[float]] = None
+    is_active: bool
     class Config:
         from_attributes = True  # Для совместимости с SQLAlchemy
 
