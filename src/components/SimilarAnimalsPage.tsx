@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react"; // Добавлен useEffect для потенциальной инициализации
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -6,16 +7,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import axios from 'axios';
 import { AnimalCard } from "./AnimalCard";
 
-// Добавляем токен ко всем запросам
-axios.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Типы данных, возвращаемые с бэкенда (AnimalModel)
 interface Animal {
   id: number;
   name: string;
@@ -24,12 +15,12 @@ interface Animal {
   color: string;
   location: string;
   description: string;
-  created_at: string; // ISO-строка даты
+  created_at: string;
   breed?: string;
   contact_name: string;
   contact_phone: string;
   contact_email: string;
-  image_url: string; 
+  image_url: string;
 }
 
 interface User {
@@ -39,36 +30,132 @@ interface User {
 }
 
 interface SimilarAnimalsPageProps {
-  onNavigate: (page: string) => void;
   user: User;
 }
 
-// Вспомогательная функция для форматирования даты
+interface PaginationData {
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
 const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-export function SimilarAnimalsPage({ onNavigate, user }: SimilarAnimalsPageProps) {
+export function SimilarAnimalsPage({ user }: SimilarAnimalsPageProps) {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Состояние для загрузки файла
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
 
   // Состояние для результатов поиска
-  const [similarAnimals, setSimilarAnimals] = useState<Animal[]>([]);
+  const [animals, setAnimals] = useState<Animal[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Состояние для фильтров
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
+  // Состояние для пагинации
+  const [pagination, setPagination] = useState<PaginationData>({
+    total: 0,
+    page: 1,
+    size: 10,
+    pages: 1
+  });
 
-  // Инициализация при монтировании: сразу загружаем общий список
+  // Состояние для фильтров (инициализируем из URL)
+  const [filters, setFilters] = useState({
+    status: searchParams.get('status') || 'all',
+    type: searchParams.get('type') || 'all',
+    location: searchParams.get('location') || '',
+    sort_order: searchParams.get('sort_order') || 'desc', // desc = новые сначала, asc = старые сначала
+    page: Number(searchParams.get('page')) || 1,
+    limit: Number(searchParams.get('limit')) || 10
+  });
+
+  // Загрузка данных при изменении фильтров
   useEffect(() => {
-    handleSearch(true); // Вызываем поиск при загрузке страницы, чтобы показать все объявления
-  }, []);
+    // Обновляем URL при изменении фильтров
+    const params = new URLSearchParams();
+    if (filters.status !== 'all') params.set('status', filters.status);
+    if (filters.type !== 'all') params.set('type', filters.type);
+    if (filters.location) params.set('location', filters.location);
+    if (filters.sort_order !== 'desc') params.set('sort_order', filters.sort_order);
+    if (filters.page > 1) params.set('page', filters.page.toString());
+    if (filters.limit !== 10) params.set('limit', filters.limit.toString());
+    
+    setSearchParams(params, { replace: true });
+    
+    // Загружаем данные с сервера
+    fetchAnimals();
+  }, [filters.status, filters.type, filters.location, filters.sort_order, filters.page, filters.limit]);
 
-  // Обновление превью при выборе файла
+  // Загрузка данных с сервера с пагинацией, фильтрацией и сортировкой
+  const fetchAnimals = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const params = new URLSearchParams();
+      params.set('skip', ((filters.page - 1) * filters.limit).toString());
+      params.set('limit', filters.limit.toString());
+      params.set('sort_order', filters.sort_order); // <-- параметр сортировки
+      
+      if (filters.status !== 'all') params.set('status', filters.status);
+      if (filters.type !== 'all') params.set('type', filters.type);
+      if (filters.location) params.set('location', filters.location);
+      
+      const response = await axios.get(`/api/animals/?${params.toString()}`);
+      
+      setAnimals(response.data.animals || []);
+      setPagination({
+        total: response.data.total,
+        page: filters.page,
+        size: filters.limit,
+        pages: Math.ceil(response.data.total / filters.limit)
+      });
+    } catch (err: any) {
+      console.error('Error fetching animals:', err);
+      setError(err.response?.data?.detail || 'Ошибка загрузки данных');
+      setAnimals([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Поиск по изображению
+  const handleImageSearch = async () => {
+    if (!uploadedFile) return;
+
+    setLoading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append('file', uploadedFile);
+
+    try {
+      const response = await axios.post('/api/animals/search_similar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setAnimals(response.data.animals || []);
+      setPagination({
+        total: response.data.animals?.length || 0,
+        page: 1,
+        size: response.data.animals?.length || 0,
+        pages: 1
+      });
+    } catch (err: any) {
+      console.error('Image Search error:', err);
+      setError(`Ошибка поиска по изображению: ${err.response?.data?.detail || err.message}`);
+      setAnimals([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setUploadedFile(file);
@@ -80,85 +167,57 @@ export function SimilarAnimalsPage({ onNavigate, user }: SimilarAnimalsPageProps
     setError(null);
   };
 
-  // 1. Поиск по изображению
-  const handleImageSearch = async () => {
-    if (!uploadedFile) return; // Проверка на всякий случай
-
-    setLoading(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.append('file', uploadedFile);
-
-    try {
-      // POST запрос для поиска по изображению
-      const response = await axios.post('/api/animals/search_similar', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      setSimilarAnimals(response.data.animals || []);
-
-    } catch (err: any) {
-      console.error('Image Search error:', err);
-      const errorMessage = err.response?.data?.detail || err.message || 'Ошибка сети или сервера';
-      setError(`Ошибка поиска по изображению: ${errorMessage}`);
-      setSimilarAnimals([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // 2. Общий поиск (по умолчанию)
-  const handleGeneralSearch = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-        // GET запрос для получения всего списка (который мы будем фильтровать локально)
-        const response = await axios.get('/api/animals/'); 
-        setSimilarAnimals(response.data.animals || []);
-    } catch (err: any) {
-        console.error('General search error:', err);
-        const errorMessage = err.response?.data?.detail || err.message || 'Ошибка сети или сервера';
-        setError(`Ошибка загрузки списка животных: ${errorMessage}`);
-        setSimilarAnimals([]);
-    } finally {
-        setLoading(false);
-    }
-  }
-
-  // 3. Единый обработчик поиска
-  const handleSearch = async (isInitialLoad = false) => {
+  // Обработчик поиска
+  const handleSearch = async () => {
     if (uploadedFile) {
-        await handleImageSearch();
+      await handleImageSearch();
     } else {
-        // Если нет файла, выполняем общий поиск.
-        // Это также происходит при первой загрузке страницы.
-        await handleGeneralSearch();
+      setFilters(prev => ({ ...prev, page: 1 }));
     }
   };
 
-  // Локальная фильтрация результатов
-  const filteredAnimals = similarAnimals.filter(animal => {
-    if (statusFilter !== 'all' && animal.status !== statusFilter) return false;
-    if (typeFilter !== 'all' && animal.type !== typeFilter) return false;
-    return true;
-  });
+  // Обработчики изменения фильтров
+  const handleStatusChange = (value: string) => {
+    setFilters(prev => ({ ...prev, status: value, page: 1 }));
+  };
 
+  const handleTypeChange = (value: string) => {
+    setFilters(prev => ({ ...prev, type: value, page: 1 }));
+  };
+
+  const handleLocationChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFilters(prev => ({ ...prev, location: e.target.value, page: 1 }));
+  };
+
+  const handleSortChange = (value: string) => {
+    setFilters(prev => ({ ...prev, sort_order: value, page: 1 }));
+  };
+
+  const handleLimitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters(prev => ({ ...prev, limit: Number(e.target.value), page: 1 }));
+  };
+
+  // Навигация по страницам
+  const goToPage = (newPage: number) => {
+    if (newPage >= 1 && newPage <= pagination.pages) {
+      setFilters(prev => ({ ...prev, page: newPage }));
+    }
+  };
+
+  const showImageSearchResults = !!uploadedFile;
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">
-          Поиск животных (по фото или по каталогу)
+          Поиск животных {showImageSearchResults ? 'по фото' : 'в каталоге'}
         </h1>
 
         <div className="grid lg:grid-cols-3 gap-8 mb-10">
           {/* Секция Загрузки */}
           <Card className="lg:col-span-1 h-fit sticky top-4">
             <CardHeader>
-              <CardTitle>Поиск по изображению (опционально)</CardTitle>
+              <CardTitle>Поиск по изображению</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -185,9 +244,9 @@ export function SimilarAnimalsPage({ onNavigate, user }: SimilarAnimalsPageProps
               )}
 
               <Button 
-                onClick={() => handleSearch(false)} // Кнопка вызывает общий поиск, даже если нет фото
+                onClick={handleSearch}
                 className="w-full" 
-                disabled={loading} // Теперь кнопка всегда активна, если нет загрузки
+                disabled={loading}
               >
                 {loading ? (
                   <>
@@ -197,7 +256,7 @@ export function SimilarAnimalsPage({ onNavigate, user }: SimilarAnimalsPageProps
                     </svg>
                     Поиск...
                   </>
-                ) : uploadedFile ? 'Найти похожих питомцев' : 'Обновить список / Искать'}
+                ) : uploadedFile ? 'Найти похожих питомцев' : 'Применить фильтры'}
               </Button>
               
               {error && (
@@ -210,76 +269,175 @@ export function SimilarAnimalsPage({ onNavigate, user }: SimilarAnimalsPageProps
 
           {/* Секция Результатов */}
           <div className="lg:col-span-2">
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 gap-4">
-                <h2 className="text-xl font-semibold text-gray-800">
-                    {uploadedFile ? 'Результаты поиска по фото' : 'Объявления в каталоге'} ({filteredAnimals.length})
-                </h2>
-                <div className="flex gap-2">
-                    {/* При изменении фильтров нужно обновить список, но сейчас мы фильтруем локально */}
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
-                        <SelectTrigger className="w-[120px]">
-                            <SelectValue placeholder="Статус" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Все статусы</SelectItem>
-                            <SelectItem value="lost">Потерян</SelectItem>
-                            <SelectItem value="found">Найден</SelectItem>
-                        </SelectContent>
+            {/* Фильтры (не показываем при поиске по фото) */}
+            {!showImageSearchResults && (
+              <div className="bg-white p-4 rounded-lg shadow-sm mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Статус</label>
+                    <Select value={filters.status} onValueChange={handleStatusChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Статус" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Все статусы</SelectItem>
+                        <SelectItem value="lost">Потерян</SelectItem>
+                        <SelectItem value="found">Найден</SelectItem>
+                      </SelectContent>
                     </Select>
-                    <Select value={typeFilter} onValueChange={setTypeFilter}>
-                        <SelectTrigger className="w-[120px]">
-                            <SelectValue placeholder="Тип" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Все типы</SelectItem>
-                            <SelectItem value="dog">Собака</SelectItem>
-                            <SelectItem value="cat">Кошка</SelectItem>
-                            <SelectItem value="other">Другое</SelectItem>
-                        </SelectContent>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Тип</label>
+                    <Select value={filters.type} onValueChange={handleTypeChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Тип" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Все типы</SelectItem>
+                        <SelectItem value="dog">Собака</SelectItem>
+                        <SelectItem value="cat">Кошка</SelectItem>
+                        <SelectItem value="other">Другое</SelectItem>
+                      </SelectContent>
                     </Select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Местоположение</label>
+                    <Input
+                      type="text"
+                      placeholder="Город или район"
+                      value={filters.location}
+                      onChange={handleLocationChange}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Сортировка</label>
+                    <Select value={filters.sort_order} onValueChange={handleSortChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Сортировка" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="desc">Сначала новые</SelectItem>
+                        <SelectItem value="asc">Сначала старые</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-1">На странице</label>
+                    <select
+                      value={filters.limit}
+                      onChange={handleLimitChange}
+                      className="w-full p-2 border rounded-md"
+                    >
+                      <option value="5">5</option>
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                    </select>
+                  </div>
                 </div>
+              </div>
+            )}
+
+            {/* Заголовок и количество результатов */}
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-semibold text-gray-800">
+                {showImageSearchResults 
+                  ? `Результаты поиска по фото (${animals.length})`
+                  : `Найдено объявлений: ${pagination.total}`
+                }
+              </h2>
             </div>
 
-            {loading && <p className="text-center py-8">Идет загрузка объявлений...</p>}
+            {/* Результаты */}
+            {loading && <p className="text-center py-8">Загрузка...</p>}
 
-            {!loading && similarAnimals.length === 0 && !error && (
+            {!loading && animals.length === 0 && !error && (
               <Card className="text-center p-10">
                 <CardContent className="space-y-4">
-                  <h3 className="text-lg font-medium">Нет результатов</h3>
+                  <h3 className="text-lg font-medium">Ничего не найдено</h3>
                   <p className="text-muted-foreground">
-                    Пожалуйста, загрузите изображение для поиска или нажмите кнопку "Обновить список" для просмотра всего каталога.
+                    {showImageSearchResults
+                      ? 'Попробуйте загрузить другое изображение'
+                      : 'Попробуйте изменить параметры фильтрации'
+                    }
                   </p>
                 </CardContent>
               </Card>
             )}
 
-            {!loading && filteredAnimals.length > 0 && (
-              <div className="grid sm:grid-cols-2 gap-6">
-                {/* Использование AnimalCard для каждого результата */}
-                {filteredAnimals.map((animal) => (
-                  <AnimalCard 
-                    key={animal.id}
-                    id={String(animal.id)} 
-                    name={animal.name || 'Не указано'}
-                    type={animal.type}
-                    status={animal.status}
-                    breed={animal.breed || 'Не указана'}
-                    color={animal.color}
-                    location={animal.location}
-                    dateReported={formatDate(animal.created_at)}
-                    description={animal.description || 'Нет описания'}
-                    imageUrl={`/api/animals/image/${animal.id}`} 
-                    contactInfo={`Имя: ${animal.contact_name}, Email: ${animal.contact_email}`}
-                    onViewDetails={() => onNavigate(`animal/${animal.id}`)}
-                  />
-                ))}
-              </div>
-            )}
-            
-            {!loading && similarAnimals.length > 0 && filteredAnimals.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                Нет результатов, соответствующих выбранным фильтрам.
-              </div>
+            {!loading && animals.length > 0 && (
+              <>
+                <div className="grid sm:grid-cols-2 gap-6 mb-8">
+                  {animals.map((animal) => (
+                    <AnimalCard 
+                      key={animal.id}
+                      id={String(animal.id)} 
+                      name={animal.name || 'Не указано'}
+                      type={animal.type}
+                      status={animal.status}
+                      breed={animal.breed || 'Не указана'}
+                      color={animal.color}
+                      location={animal.location}
+                      dateReported={formatDate(animal.created_at)}
+                      description={animal.description || 'Нет описания'}
+                      imageUrl={`/api/animals/image/${animal.id}`} 
+                      contactInfo={`Имя: ${animal.contact_name}, Email: ${animal.contact_email}`}
+                      onViewDetails={() => navigate(`/animal/${animal.id}`)}
+                    />
+                  ))}
+                </div>
+
+                {/* Пагинация (только для обычного поиска) */}
+                {!showImageSearchResults && pagination.pages > 1 && (
+                  <div className="flex justify-center items-center gap-2 mt-8">
+                    <Button
+                      variant="outline"
+                      onClick={() => goToPage(pagination.page - 1)}
+                      disabled={pagination.page === 1}
+                    >
+                      ← Назад
+                    </Button>
+                    
+                    <div className="flex gap-1">
+                      {Array.from({ length: Math.min(5, pagination.pages) }, (_, i) => {
+                        let pageNum;
+                        if (pagination.pages <= 5) {
+                          pageNum = i + 1;
+                        } else if (pagination.page <= 3) {
+                          pageNum = i + 1;
+                        } else if (pagination.page >= pagination.pages - 2) {
+                          pageNum = pagination.pages - 4 + i;
+                        } else {
+                          pageNum = pagination.page - 2 + i;
+                        }
+                        
+                        return (
+                          <Button
+                            key={pageNum}
+                            variant={pagination.page === pageNum ? 'default' : 'outline'}
+                            onClick={() => goToPage(pageNum)}
+                            className="w-10"
+                          >
+                            {pageNum}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    
+                    <Button
+                      variant="outline"
+                      onClick={() => goToPage(pagination.page + 1)}
+                      disabled={pagination.page === pagination.pages}
+                    >
+                      Вперед →
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

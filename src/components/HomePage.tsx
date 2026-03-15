@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom"; // <-- добавлен импорт
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -28,15 +29,16 @@ interface User {
   id: number;
   name: string;
   email: string;
-  is_superuser?: boolean; // Добавляем поле для админа
+  is_superuser?: boolean;
 }
 
 interface HomePageProps {
-  onNavigate: (page: string) => void;
-  user: User;
+  user: User; // onNavigate удалён
 }
 
-export function HomePage({ onNavigate, user }: HomePageProps) {
+export function HomePage({ user }: HomePageProps) {
+  const navigate = useNavigate(); // <-- хук для навигации
+
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
       try {
         const response = await axios.get('/api/animals/me');
         const data = response.data;
-        setAnimals(data.animals || []); 
+        setAnimals(data.animals || []);
       } catch (err: any) {
         console.error('Ошибка загрузки животных:', err);
         const errorMessage = err.response?.data?.detail || err.message || 'Ошибка сети';
@@ -87,7 +89,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
             <div className="absolute top-4 right-4 lg:top-8 lg:right-8">
               <Button 
                 variant="outline" 
-                onClick={() => onNavigate('admin')}
+                onClick={() => navigate('/admin')} // <-- изменено
                 className="bg-white shadow-lg hover:shadow-xl transition-shadow"
               >
                 <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -123,7 +125,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
             <Button 
               size="lg" 
               className="text-lg px-8 py-3"
-              onClick={() => onNavigate('upload')}
+              onClick={() => navigate('/upload')} // <-- изменено
             >
               <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -136,7 +138,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
               size="lg" 
               variant="outline" 
               className="text-lg px-8 py-3"
-              onClick={() => onNavigate('search')}
+              onClick={() => navigate('/search')} // <-- изменено
             >
               <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8"/>
@@ -148,7 +150,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
         </div>
       </section>
 
-      {/* Features Section */}
+      {/* Features Section (без изменений) */}
       <section className="py-16 px-4 sm:px-6 lg:px-8 bg-white">
         <div className="max-w-6xl mx-auto">
           <h2 className="text-3xl text-center mb-12 text-primary">
@@ -212,7 +214,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
         <div className="max-w-6xl mx-auto">
           <div className="flex justify-between items-center mb-8">
             <h2 className="text-3xl text-primary">Мои объявления</h2>
-            <Button variant="outline" onClick={() => onNavigate('upload')}>
+            <Button variant="outline" onClick={() => navigate('/upload')}> {/* <-- изменено */}
               + Добавить
             </Button>
           </div>
@@ -226,7 +228,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
           ) : animals.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               У вас пока нет объявлений. 
-              <Button variant="link" onClick={() => onNavigate('upload')} className="ml-2">
+              <Button variant="link" onClick={() => navigate('/upload')} className="ml-2"> {/* <-- изменено */}
                 Создать первое
               </Button>
             </div>
@@ -238,7 +240,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
                   <Card 
                     key={animal.id} 
                     className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
-                    onClick={() => onNavigate(`animal/${animal.id}`)}
+                    onClick={() => navigate(`/animal/${animal.id}`)} // <-- изменено
                   >
                     <div className="relative h-40">
                       <ImageWithFallback
@@ -290,7 +292,7 @@ export function HomePage({ onNavigate, user }: HomePageProps) {
             size="lg" 
             variant="secondary" 
             className="text-lg px-8 py-3"
-            onClick={() => onNavigate('upload')}
+            onClick={() => navigate('/upload')} // <-- изменено
           >
             Начать сегодня
           </Button>

@@ -1,5 +1,6 @@
 // AdminPanel.tsx
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom"; // <-- добавлен импорт
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -16,11 +17,12 @@ interface User {
 }
 
 interface AdminPanelProps {
-  onNavigate: (page: string) => void;
-  user: User; // текущий пользователь (должен быть суперпользователем)
+  user: User; // onNavigate удалён
 }
 
-export function AdminPanel({ onNavigate, user }: AdminPanelProps) {
+export function AdminPanel({ user }: AdminPanelProps) {
+  const navigate = useNavigate(); // <-- хук для навигации
+
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +92,7 @@ export function AdminPanel({ onNavigate, user }: AdminPanelProps) {
         <div className="max-w-4xl mx-auto text-center py-20">
           <h1 className="text-2xl font-bold text-red-600 mb-4">Доступ запрещен</h1>
           <p className="mb-6">У вас нет прав для просмотра этой страницы.</p>
-          <Button onClick={() => onNavigate('home')}>
+          <Button onClick={() => navigate('/')}> {/* <-- изменено */}
             Вернуться на главную
           </Button>
         </div>
@@ -104,7 +106,7 @@ export function AdminPanel({ onNavigate, user }: AdminPanelProps) {
         {/* Заголовок */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold text-primary">Управление пользователями</h1>
-          <Button variant="outline" onClick={() => onNavigate('home')}>
+          <Button variant="outline" onClick={() => navigate('/')}> {/* <-- изменено */}
             ← На главную
           </Button>
         </div>
@@ -184,7 +186,7 @@ export function AdminPanel({ onNavigate, user }: AdminPanelProps) {
                         variant={u.is_superuser ? "outline" : "default"}
                         size="sm"
                         onClick={() => toggleSuperuser(u)}
-                        disabled={u.id === user.id} // Нельзя изменить свои права
+                        disabled={u.id === user.id}
                       >
                         {u.is_superuser ? 'Снять админа' : 'Сделать админом'}
                       </Button>

@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom"; // <-- добавлен импорт
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -23,8 +24,7 @@ interface User {
 }
 
 interface UploadPageProps {
-  onNavigate: (page: string) => void;
-  user: User;
+  user: User; // onNavigate удалён
 }
 
 interface FormDataState {
@@ -41,7 +41,9 @@ interface FormDataState {
   contactEmail: string;
 }
 
-export function UploadPage({ onNavigate, user }: UploadPageProps) {
+export function UploadPage({ user }: UploadPageProps) {
+  const navigate = useNavigate(); // <-- хук для навигации
+
   // Инициализация данных с использованием данных пользователя по умолчанию
   const [formData, setFormData] = useState<FormDataState>({
     petName: '',
@@ -120,7 +122,7 @@ export function UploadPage({ onNavigate, user }: UploadPageProps) {
       await axios.post('/api/animals/', data);
 
       alert("Объявление успешно добавлено!");
-      onNavigate('home'); // Перенаправляем на главную после успеха
+      navigate('/'); // <-- изменено: перенаправляем на главную
 
     } catch (err: any) {
       console.error('Upload error:', err.response || err);
@@ -346,7 +348,7 @@ export function UploadPage({ onNavigate, user }: UploadPageProps) {
             <Button
               type="button"
               variant="outline"
-              onClick={() => onNavigate('home')}
+              onClick={() => navigate('/')} // <-- изменено
               disabled={isProcessing}
             >
               Отмена
