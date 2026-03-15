@@ -1,11 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, text
-from typing import Optional, List
+from sqlalchemy import or_, text
+from typing import Optional
 from datetime import datetime
-from sqlalchemy.sql import func
-from sqlalchemy import func, cast
-from pgvector.sqlalchemy import Vector
 
 from fastapi import File, UploadFile, Form
 from typing import Annotated
@@ -13,40 +10,35 @@ from PIL import Image
 from io import BytesIO
 from pydantic.networks import EmailStr
 
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import RedirectResponse
+
 import os
 
 from app.core.database import get_db
 from app.models.animal import Animal
 from app.models.user import User
-from app.schemas.animal import AnimalCreate, AnimalResponse, AnimalSearch, AnimalListResponse, AnimalUpdate
+from app.schemas.animal import AnimalResponse, AnimalSearch, AnimalListResponse, AnimalUpdate
 from app.core.security import get_animal_if_owner_or_admin, get_current_user_from_bearer
-
 from app.core.embedding import get_embedding_from_pil
-
-IMAGE_DIR = "uploaded_images"
-if not os.path.exists(IMAGE_DIR):
-    os.makedirs(IMAGE_DIR)
+from app.core.minio_service import minio_service
 
 router = APIRouter()
 
 
 @router.get("/", response_model=AnimalListResponse)
 async def get_animals(
-        skip: int = Query(0, ge=0, description="Количество записей для пропуска"),
-        limit: int = Query(100, ge=1, le=1000, description="Лимит записей"),
-        search: Optional[str] = Query(None, description="Поиск по имени, описанию или локации"),
-        status: Optional[str] = Query(None, description="Фильтр по статусу: lost или found"),
-        type: Optional[str] = Query(None, description="Фильтр по типу: dog, cat или other"),
-        location: Optional[str] = Query(None, description="Фильтр по локации"),
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=1000),
+        search: Optional[str] = Query(None),
+        status: Optional[str] = Query(None),
+        type: Optional[str] = Query(None),
+        location: Optional[str] = Query(None),
+        sort_order: Optional[str] = Query("desc", description="Направление сортировки по дате: asc или desc"),
         db: Session = Depends(get_db)
 ):
-    """Получить список животных с пагинацией и фильтрацией"""
-
-    # Базовый запрос
+    """Получить список животных с пагинацией, фильтрацией и сортировкой по дате"""
     query = db.query(Animal).filter(Animal.is_active == True)
 
-    # Применяем фильтры
     if search:
         search_filter = or_(
             Animal.name.ilike(f"%{search}%"),
@@ -65,10 +57,13 @@ async def get_animals(
     if location:
         query = query.filter(Animal.location.ilike(f"%{location}%"))
 
-    # Получаем общее количество для пагинации
-    total = query.count()
+    # Сортировка по дате создания
+    if sort_order == "desc":
+        query = query.order_by(Animal.created_at.desc())  # Сначала новые
+    else:
+        query = query.order_by(Animal.created_at.asc())   # Сначала старые
 
-    # Применяем пагинацию
+    total = query.count()
     animals = query.offset(skip).limit(limit).all()
 
     return AnimalListResponse(
@@ -77,19 +72,6 @@ async def get_animals(
         page=(skip // limit) + 1 if limit > 0 else 1,
         size=len(animals)
     )
-
-
-# Функция для сохранения файла на диске
-async def save_upload_file_locally(file: UploadFile, animal_id: int):
-    # Определяем расширение и путь
-    extension = file.filename.split('.')[-1].lower() if file.filename else 'jpeg'
-    file_path = os.path.join(IMAGE_DIR, f"animal_{animal_id}.{extension}")
-
-    # Сохраняем содержимое файла
-    contents = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(contents)
-    return file_path, extension
 
 
 @router.post("/", response_model=AnimalResponse, status_code=201)
@@ -105,7 +87,7 @@ async def create_animal(
         breed: Annotated[Optional[str], Form()] = None,
         description: Annotated[Optional[str], Form()] = None,
         contact_phone: Annotated[Optional[str], Form()] = None,
-        file: UploadFile = File(...),  # файл обязателен
+        file: UploadFile = File(...),
         current_user: User = Depends(get_current_user_from_bearer),
         db: Session = Depends(get_db),
 ):
@@ -113,10 +95,9 @@ async def create_animal(
     if not file.content_type.startswith("image/"):
         raise HTTPException(400, "Можно загружать только изображения")
 
-    # Читаем содержимое файла ОДИН раз
     contents = await file.read()
 
-    # 1. Получаем embedding
+    # Получаем embedding
     embedding = None
     try:
         image = Image.open(BytesIO(contents)).convert("RGB")
@@ -124,7 +105,7 @@ async def create_animal(
     except Exception as e:
         print(f"⚠️ Embedding error: {e}")
 
-    # 2. Сохраняем Animal в БД, чтобы получить db_animal.id
+    # Сохраняем животное в БД без image_url
     db_animal = Animal(
         name=name,
         type=type,
@@ -139,33 +120,31 @@ async def create_animal(
         contact_email=contact_email,
         owner_id=current_user.id,
         embedding=embedding,
-        image_url=None  # Изначально NULL, обновим после сохранения файла
+        image_url=None
     )
     db.add(db_animal)
     db.commit()
     db.refresh(db_animal)
 
-    # 3. Сохраняем файл на диске, используя ID из БД
+    # Сохраняем файл в MinIO
     try:
+        # Определяем расширение
         extension = file.filename.split('.')[-1].lower() if file.filename and '.' in file.filename else 'jpeg'
         if extension == 'jpg': extension = 'jpeg'
         if extension not in ['jpeg', 'png']: extension = 'jpeg'
 
-        file_name = f"animal_{db_animal.id}.{extension}"
-        file_path = os.path.join(IMAGE_DIR, file_name)
+        object_name = f"animal_{db_animal.id}.{extension}"
+        # Загружаем в MinIO
+        minio_service.upload_file(contents, object_name, file.content_type)
 
-        # Записываем содержимое файла на диск
-        with open(file_path, "wb") as f:
-            f.write(contents)
-
-        # Обновляем image_url в БД, чтобы хранить имя файла
-        db_animal.image_url = file_name
+        # Обновляем image_url в БД
+        db_animal.image_url = object_name
         db.commit()
 
     except Exception as e:
-        print(f"⚠️ File save error for animal {db_animal.id}: {e}")
+        print(f"⚠️ MinIO upload error for animal {db_animal.id}: {e}")
 
-    # Конвертируем embedding в список
+    # Конвертируем embedding в список для ответа (если нужно)
     if db_animal.embedding is not None:
         if hasattr(db_animal.embedding, 'tolist'):
             db_animal.embedding = db_animal.embedding.tolist()
@@ -180,15 +159,12 @@ async def get_my_animals(
     current_user: User = Depends(get_current_user_from_bearer),
     db: Session = Depends(get_db)
 ):
-    """Получить список животных, созданных текущим пользователем"""
     query = db.query(Animal).filter(
         Animal.owner_id == current_user.id,
         Animal.is_active == True
     )
-
     total = query.count()
     animals = query.all()
-
     return AnimalListResponse(
         animals=animals,
         total=total,
@@ -197,19 +173,11 @@ async def get_my_animals(
     )
 
 
-
 @router.get("/{animal_id}", response_model=AnimalResponse)
 async def get_animal(animal_id: int, db: Session = Depends(get_db)):
-    """Получить животное по ID"""
-
     animal = db.query(Animal).filter(Animal.id == animal_id, Animal.is_active == True).first()
-
     if not animal:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Животное не найдено"
-        )
-
+        raise HTTPException(status_code=404, detail="Животное не найдено")
     return animal
 
 
@@ -217,18 +185,13 @@ async def get_animal(animal_id: int, db: Session = Depends(get_db)):
 async def update_animal(
     animal_id: int,
     animal_update: AnimalUpdate,
-    animal: Animal = Depends(get_animal_if_owner_or_admin),  # автоматическая проверка прав
+    animal: Animal = Depends(get_animal_if_owner_or_admin),
     db: Session = Depends(get_db)
 ):
-    """Обновить информацию о животном (только владелец или суперпользователь)"""
-
-    # Обновляем только переданные поля
     update_data = animal_update.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(animal, field, value)
-
     animal.updated_at = datetime.utcnow()
-
     db.commit()
     db.refresh(animal)
     return animal
@@ -237,15 +200,11 @@ async def update_animal(
 @router.delete("/{animal_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_animal(
     animal_id: int,
-    animal: Animal = Depends(get_animal_if_owner_or_admin),  # ← проверка прав
+    animal: Animal = Depends(get_animal_if_owner_or_admin),
     db: Session = Depends(get_db)
 ):
-    """Удалить животное (только владелец или суперпользователь)"""
-
-    # Мягкое удаление: не удаляем из БД, а помечаем как неактивное
     animal.is_active = False
     animal.updated_at = datetime.utcnow()
-
     db.commit()
     return
 
@@ -257,11 +216,7 @@ async def search_animals(
         limit: int = 100,
         db: Session = Depends(get_db)
 ):
-    """Поиск животных по критериям"""
-
     query = db.query(Animal).filter(Animal.is_active == True)
-
-    # Применяем критерии поиска
     if search.search_term:
         search_filter = or_(
             Animal.name.ilike(f"%{search.search_term}%"),
@@ -271,22 +226,14 @@ async def search_animals(
             Animal.color.ilike(f"%{search.search_term}%")
         )
         query = query.filter(search_filter)
-
     if search.status:
         query = query.filter(Animal.status == search.status)
-
     if search.type:
         query = query.filter(Animal.type == search.type)
-
     if search.location:
         query = query.filter(Animal.location.ilike(f"%{search.location}%"))
-
-    # Получаем общее количество
     total = query.count()
-
-    # Применяем пагинацию
     animals = query.offset(skip).limit(limit).all()
-
     return AnimalListResponse(
         animals=animals,
         total=total,
@@ -309,10 +256,7 @@ async def search_similar_animals(
     image = Image.open(BytesIO(contents)).convert("RGB")
     query_embedding = get_embedding_from_pil(image)
 
-    # Преобразуем embedding в строку в формате '[x,y,z]'
     embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
-
-    # Правильный вызов bindparam
     animals = db.query(Animal).filter(
         Animal.is_active == True,
         Animal.embedding.isnot(None)
@@ -331,26 +275,20 @@ async def search_similar_animals(
 @router.get("/image/{animal_id}")
 async def get_animal_image(animal_id: int, db: Session = Depends(get_db)):
     """
-    Возвращает изображение животного по его ID, хранящееся локально.
+    Возвращает редирект на presigned URL изображения из MinIO.
     """
-    # 1. Проверяем, существует ли животное в базе данных (опционально, но лучше)
     animal = db.query(Animal).filter(Animal.id == animal_id).first()
     if not animal:
         raise HTTPException(status_code=404, detail="Животное не найдено")
 
-    # 2. Определяем путь к файлу
-    # Предполагаем, что файл называется animal_{id}.jpg/png и хранится в IMAGE_DIR
-    # Важно: нам нужно знать, какой формат (расширение) файла используется
+    if not animal.image_url:
+        raise HTTPException(status_code=404, detail="Изображение отсутствует")
 
-    # Для простоты будем искать либо .jpeg, либо .png
-    image_path_jpg = os.path.join(IMAGE_DIR, f"animal_{animal_id}.jpeg")
-    image_path_png = os.path.join(IMAGE_DIR, f"animal_{animal_id}.png")
+    # Генерируем presigned URL (действителен 1 час)
+    try:
+        presigned_url = minio_service.get_presigned_url(animal.image_url, expires_in=3600)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении изображения: {str(e)}")
 
-    if os.path.exists(image_path_jpg):
-        return FileResponse(image_path_jpg, media_type="image/jpeg")
-    elif os.path.exists(image_path_png):
-        return FileResponse(image_path_png, media_type="image/png")
-    else:
-        # Если файл не найден, возвращаем 404
-        # (или можно вернуть заглушку, но 404 более корректен)
-        raise HTTPException(status_code=404, detail="Изображение для этого животного не найдено")
+    # Редирект на presigned URL
+    return RedirectResponse(url=presigned_url)
