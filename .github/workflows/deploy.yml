@@ -1,0 +1,23 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t animal-backend ./backend
+
+      - name: Build frontend image
+        run: docker build -t animal-frontend ./frontend
+
+      # (Опционально) быстрая проверка, что образы собрались
+      - name: Check images
+        run: docker images | grep animal-
